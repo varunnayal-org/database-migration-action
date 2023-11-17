@@ -8,12 +8,15 @@ import { OctokitOptions } from '@octokit/core/dist-types/types'
 import { RestEndpointMethodTypes } from '@octokit/rest'
 // eslint-disable-next-line import/no-unresolved
 import { OctokitResponse } from '@octokit/types'
+import { MinimalPRInfo } from '../types'
 
 export type GithubClient = ReturnType<typeof getOctokit> // InstanceType<typeof GitHub>
 export type PullRequestGetResponse = RestEndpointMethodTypes['pulls']['get']['response']['data']
 export type IssueUpdateCommentResponse = RestEndpointMethodTypes['issues']['updateComment']['response']['data']
 export type IssueCreateCommentResponse = RestEndpointMethodTypes['issues']['createComment']['response']['data']
 export type IssueAddLabelResponse = RestEndpointMethodTypes['issues']['addLabels']['response']['data']
+export type PullRequestGetReviewList = RestEndpointMethodTypes['pulls']['listReviews']['response']['data']
+export type RepoGetCollaboratorListResponse = RestEndpointMethodTypes['repos']['listCollaborators']['response']['data']
 
 export interface GithubPRCommentMinimal {
   action: string
@@ -85,11 +88,13 @@ class Github {
   #repoOwner = ''
   #repoName = ''
   #client: GithubClient
-  #repoToken: string
 
   constructor(repoToken: string, opts?: OctokitOptions) {
-    this.#repoToken = repoToken
     this.#client = buildOctokit(repoToken, opts)
+  }
+
+  static fromEnv(opts?: OctokitOptions): Github {
+    return new Github(getEnv('REPO_TOKEN'), opts)
   }
 
   setOrg(organization: string, repoOwner: string, repoName: string): this {
@@ -184,6 +189,7 @@ class Github {
         })
       )
     )
+
     // await axios.get(prApiUrl, {
     //   headers: {
     //     Authorization: `Bearer ${this.#repoToken}`,
@@ -191,6 +197,30 @@ class Github {
     //     Accept: 'application/json'
     //   }
     // })
+  }
+
+  async getPullRequestApprovals(prNumber: number): Promise<PullRequestGetReviewList> {
+    const reviewList = this.#validateAPIResponse(
+      'PR Review List Error',
+      await this.#client.rest.pulls.listReviews({
+        owner: this.#repoOwner,
+        repo: this.#repoName,
+        pull_number: prNumber
+      })
+    )
+
+    return reviewList.filter(review => review.state === 'APPROVED')
+  }
+
+  async getCodeOwners(): Promise<RepoGetCollaboratorListResponse> {
+    const codeOwnerList = this.#validateAPIResponse(
+      'Code owner List Error',
+      await this.#client.rest.repos.listCollaborators({
+        owner: this.#repoOwner,
+        repo: this.#repoName
+      })
+    )
+    return codeOwnerList
   }
 
   buildPRInfoFromPRResponse(prResponse: PullRequestGetResponse): PRInfo {
@@ -202,6 +232,53 @@ class Github {
       labels: prResponse.labels.map((label: PullRequestGetResponse['labels'][number]) => label.name),
       state: prResponse.state
     }
+  }
+
+  async getMinimalPRInfo(prNumber: number): Promise<MinimalPRInfo> {
+    const query = `
+  query($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        state
+        isDraft
+        labels(first: 100) {
+          nodes {
+            name
+          }
+        }
+        author {
+          login
+        }
+        baseRefName
+        reviews(first: 100, states: APPROVED) {
+          nodes {
+            author {
+              login
+            }
+            body
+            submittedAt
+            commit {
+              oid
+            }
+          }
+        }
+      }
+
+      # expression: $prLastCommitOid
+      # Format  "<sha>:.github/CODEOWNERS"
+      object(expression: "HEAD:.github/CODEOWNERS") {
+        ... on Blob {
+          text
+        }
+      }
+    }
+  }
+`
+    return await this.#client.graphql<MinimalPRInfo>(query, {
+      owner: this.#repoOwner,
+      name: this.#repoName,
+      number: prNumber
+    })
   }
 
   async getPRInfoFromNumber(prNumber: number): Promise<PRInfo> {

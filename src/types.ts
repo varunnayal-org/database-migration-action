@@ -26,6 +26,55 @@ export interface GitHubEvent {
   }
 }
 
+export interface MinimalPRInfo {
+  repository: Repository
+}
+
+export interface Repository {
+  pullRequest: PullRequest
+  object: CodeOwnersFile
+}
+
+export interface PullRequest {
+  state: string
+  isDraft: boolean
+  labels: LabelCollection
+  author: User
+  baseRefName: string
+  reviews: ReviewCollection
+}
+
+export interface LabelCollection {
+  nodes: Label[]
+}
+
+export interface Label {
+  name: string
+}
+
+export interface User {
+  login: string
+}
+
+export interface ReviewCollection {
+  nodes: Review[]
+}
+
+export interface Review {
+  author: User
+  body: string
+  submittedAt: string
+  commit: Commit
+}
+
+export interface Commit {
+  oid: string
+}
+
+export interface CodeOwnersFile {
+  text: string
+}
+
 // #region JIRA
 export interface JiraEvent {
   event_type: string

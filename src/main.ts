@@ -41,7 +41,7 @@ interface BuildDataResult {
 }
 
 const awsClient = new AWSClient()
-const ghClient = new GHClient(getEnv('REPO_TOKEN'))
+const ghClient = GHClient.fromEnv()
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 const eventData: JiraEvent | GitHubEvent = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH!, 'utf8')) // Use non-null assertion for process.env
 const prBaseBranchName = getEnv('PR_BASE_BRANCH')
@@ -183,7 +183,7 @@ function dt(): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getPRInfo(prApiUrl: string): Promise<any> {
+async function getPRInfoFromJiraEvent(prApiUrl: string): Promise<any> {
   // Define a more specific return type if possible
   // Function body remains the same
   const response: PullRequestGetResponse = await ghClient.getPRFromURL(prApiUrl)
@@ -202,7 +202,9 @@ async function getPRInfo(prApiUrl: string): Promise<any> {
 
 async function fromJira(event: JiraEvent, awsSecrets: AWSSecrets): Promise<void> {
   const payload = event.client_payload
-  const { organization, repoOwner, repoName, prNumber, prInfo, repoHtmlUrl } = await getPRInfo(payload.github.pr_url)
+  const { organization, repoOwner, repoName, prNumber, prInfo, repoHtmlUrl } = await getPRInfoFromJiraEvent(
+    payload.github.pr_url
+  )
 
   ghClient.setOrg(organization, repoOwner, repoName)
 
