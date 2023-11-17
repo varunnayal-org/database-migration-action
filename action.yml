@@ -37,6 +37,8 @@ runs:
       run: echo "${{ toJson(github) }}"
     - name: Print GitHub Env
       shell: bash
+      env:
+        REPO_TOKEN: ${{ inputs.repo_token }}
       run: |
         env
     # - name: Fetch PR details
