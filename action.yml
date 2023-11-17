@@ -11,6 +11,19 @@ inputs:
   migration_config_file:
     description: 'Migration configuration file'
     default: './db.migration.json'
+  aws_access_key_id:
+    description: AWS Access Key ID
+    required: false
+  aws_access_key_secret:
+    description: AWS Access Secret
+    required: false
+  aws_region:
+    description: AWS Region
+    required: false
+    default: ap-south-1
+  aws_endpoint_url:
+    description: AWS API Endpoint URL
+    required: false
   debug:
     description: 'show debug logs (true|false)'
     default: 'false'
