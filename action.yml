@@ -29,53 +29,20 @@ inputs:
     default: 'false'
 
 runs:
-  using: node20
-  main: 'dist/index.js'
-
-# runs:
-#   # composite doesn't inject INPUT_* variables automatically
-#   using: composite
-#   # using: node20
-#   steps:
-#     - name: Print GitHub Context
-#       shell: bash
-#       run: echo "${{ toJson(github) }}"
-
-#     # - name: Fetch PR details
-#     #   id: pr_details
-#     #   shell: bash
-#     #   # if: ${{ !env.ACT }}
-#     #   env:
-#     #     REPO_TOKEN: ${{ inputs.repo_token }}
-#     #   run: |
-#     #     PR_DETAILS=$(curl -s -L -H "Authorization: token $REPO_TOKEN" "${{ github.event.issue.pull_request.url }}")
-#     #     # echo "PR_DETAILS=$PR_DETAILS" >> $GITHUB_ENV
-#     #     echo "::set-output name=head_sha::$(echo "$PR_DETAILS" | jq -r .head.sha)"
-#     #     echo "::set-output name=labels::$(echo "$PR_DETAILS" | jq -c .labels)"
-#     # - name: set head branch
-#     #   shell: bash
-#     #   # if: ${{ !env.ACT }}
-#     #   run: |
-#     #     echo ${{ steps.pr_details.outputs.head_sha }}
-#     - name: checkout repo
-#       uses: actions/checkout@v3
-#       # if: ${{ !env.ACT }}
-#       # with:
-#       #   ref: ${{ steps.pr_details.outputs.head_sha }}
-#     - name: Print GitHub Env
-#       shell: bash
-#       env:
-#         REPO_TOKEN: ${{ inputs.repo_token }}
-#       run: |
-#         ls -ltrha
-#         cat VERSION
-#     - name: migration approvals
-#       shell: bash
-#       run: node $GITHUB_ACTION_PATH/dist/index.js
-#       env:
-#         INPUT_REPO_TOKEN: ${{ inputs.repo_token }}
-#         INPUT_MIGRATION_CONFIG_FILE: ${{ inputs.migration_config_file }}
-#         INPUT_AWS_ACCESS_KEY_ID: ${{ inputs.aws_access_key_id }}
-#         INPUT_AWS_ACCESS_KEY_SECRET: ${{ inputs.aws_access_key_secret }}
-#         INPUT_AWS_ENDPOINT_URL: ${{ inputs.aws_endpoint_url }}
-#         INPUT_DEBUG: ${{ inputs.debug }}
+  using: composite
+  steps:
+    - name: Print GitHub Context
+      shell: bash
+      run: echo "${{ toJson(github) }}"
+    - name: checkout repo
+      uses: actions/checkout@v3
+    - name: migration approvals
+      shell: bash
+      run: node $GITHUB_ACTION_PATH/dist/index.js
+      env:
+        INPUT_REPO_TOKEN: ${{ inputs.repo_token }}
+        INPUT_MIGRATION_CONFIG_FILE: ${{ inputs.migration_config_file }}
+        INPUT_AWS_ACCESS_KEY_ID: ${{ inputs.aws_access_key_id }}
+        INPUT_AWS_ACCESS_KEY_SECRET: ${{ inputs.aws_access_key_secret }}
+        INPUT_AWS_ENDPOINT_URL: ${{ inputs.aws_endpoint_url }}
+        INPUT_DEBUG: ${{ inputs.debug }}
