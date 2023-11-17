@@ -2,8 +2,10 @@ import path from 'path'
 import { getInput } from './util'
 
 export interface Config {
+  /**
+   * Directory where migrations are present
+   */
   base_directory: string
-  base_branch: string
   tokens: TokenConfig
   jira: {
     domain: string
@@ -15,7 +17,19 @@ export interface Config {
     custom_field_pr_link: string
     custom_field_repo_link: string
   }
+
+  /**
+   * Base branch to which merging should occur
+   */
+  pr_base_branch: string
+  /**
+   * Label to add on PR
+   */
   pr_label: string
+
+  /**
+   * Github teams allowed to approve PR
+   */
   teams: string[]
   databases: DatabaseConfig[]
   secret_provider: {
@@ -42,8 +56,8 @@ export default function buildConfig(): Config {
   if (!config.base_directory) {
     config.base_directory = 'migrations'
   }
-  if (!config.base_branch) {
-    config.base_branch = 'main'
+  if (!config.pr_base_branch) {
+    config.pr_base_branch = 'main'
   }
 
   if (!config.tokens) {

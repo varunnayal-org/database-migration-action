@@ -125,7 +125,7 @@ async function buildData(params: BuildDataParams): Promise<BuildDataResult> {
   const prInfo = params.prInfo || (await ghClient.getPRInfoFromNumber(params.prNumber))
   console.log(`PR Info: `, prInfo)
 
-  const errMsg = validatePR(prInfo, config.base_branch, params.commentOwner, result.dryRun)
+  const errMsg = validatePR(prInfo, config.pr_base_branch, params.commentOwner, result.dryRun)
   if (errMsg) {
     result.errMsg.invalidPR = errMsg
     result.errorMessage = result.errMsg.invalidPR

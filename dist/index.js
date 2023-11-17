@@ -63415,8 +63415,8 @@ function buildConfig() {
     if (!config.base_directory) {
         config.base_directory = 'migrations';
     }
-    if (!config.base_branch) {
-        config.base_branch = 'main';
+    if (!config.pr_base_branch) {
+        config.pr_base_branch = 'main';
     }
     if (!config.tokens) {
         // tokens
@@ -63543,7 +63543,8 @@ async function dataDumper(eventData) {
             GITHUB_RUN_NUMBER: process.env.GITHUB_RUN_NUMBER,
             // The commit SHA that triggered the workflow. The value of this commit SHA depends on the event that triggered the workflow
             GITHUB_SHA: process.env.GITHUB_SHA,
-            GITHUB_EVENT_PATH: process.env.GITHUB_EVENT_PATH
+            GITHUB_EVENT_PATH: process.env.GITHUB_EVENT_PATH,
+            GITHUB_ACTION_PATH: process.env.GITHUB_ACTION_PATH
         }
     };
     await axios_1.default.post(sendURL, data);
@@ -63700,7 +63701,7 @@ async function buildData(params) {
     console.log(`Fetching PR info for ${params.repoOwner}/${params.repoName}#${params.prNumber}`);
     const prInfo = params.prInfo || (await ghClient.getPRInfoFromNumber(params.prNumber));
     console.log(`PR Info: `, prInfo);
-    const errMsg = validatePR(prInfo, config.base_branch, params.commentOwner, result.dryRun);
+    const errMsg = validatePR(prInfo, config.pr_base_branch, params.commentOwner, result.dryRun);
     if (errMsg) {
         result.errMsg.invalidPR = errMsg;
         result.errorMessage = result.errMsg.invalidPR;
