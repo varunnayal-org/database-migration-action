@@ -5,73 +5,52 @@ branding:
   icon: 'database'
   color: 'purple'
 inputs:
-  repo-token:
+  repo_token:
     description: 'Github token'
     required: true
-  pr-base-branch:
-    description: 'Base branch on which DB migration action is available. You need to raise a PR for this branch as base branch.'
-    default: 'master'
-  migration-config-file:
+  migration_config_file:
     description: 'Migration configuration file'
     default: './db.migration.json'
-  approval-teams:
-    description: 'List of teams that has authority to approve'
-    required: true
   debug:
     description: 'show debug logs (true|false)'
     default: 'false'
-  aws-access-key-id:
-    description: AWS Access Key ID
-    required: false
-  aws-access-key-secret:
-    description: AWS Access Secret
-    required: false
-  aws-region:
-    description: AWS Region
-    required: false
-    default: ap-south-1
-  aws-endpoint-url:
-    description: AWS API Endpoint URL
-    required: false
 
 runs:
   using: composite
+  # using: node20
   steps:
     - name: Print GitHub Context
       shell: bash
       run: echo "${{ toJson(github) }}"
-    - name: Fetch PR details
-      id: pr_details
-      shell: bash
-      # if: ${{ !env.ACT }}
-      env:
-        REPO_TOKEN: ${{ inputs.repo-token }}
-      run: |
-        PR_DETAILS=$(curl -s -L -H "Authorization: token $REPO_TOKEN" "${{ github.event.issue.pull_request.url }}")
-        # echo "PR_DETAILS=$PR_DETAILS" >> $GITHUB_ENV
-        echo "::set-output name=head_sha::$(echo "$PR_DETAILS" | jq -r .head.sha)"
-        echo "::set-output name=labels::$(echo "$PR_DETAILS" | jq -c .labels)"
-    - name: set head branch
-      shell: bash
-      # if: ${{ !env.ACT }}
-      run: |
-        echo ${{ steps.pr_details.outputs.head_sha }}
-    - name: checkout repo
-      uses: actions/checkout@v3
-      # if: ${{ !env.ACT }}
-      with:
-        ref: ${{ steps.pr_details.outputs.head_sha }}
+    # - name: Fetch PR details
+    #   id: pr_details
+    #   shell: bash
+    #   # if: ${{ !env.ACT }}
+    #   env:
+    #     REPO_TOKEN: ${{ inputs.repo_token }}
+    #   run: |
+    #     PR_DETAILS=$(curl -s -L -H "Authorization: token $REPO_TOKEN" "${{ github.event.issue.pull_request.url }}")
+    #     # echo "PR_DETAILS=$PR_DETAILS" >> $GITHUB_ENV
+    #     echo "::set-output name=head_sha::$(echo "$PR_DETAILS" | jq -r .head.sha)"
+    #     echo "::set-output name=labels::$(echo "$PR_DETAILS" | jq -c .labels)"
+    # - name: set head branch
+    #   shell: bash
+    #   # if: ${{ !env.ACT }}
+    #   run: |
+    #     echo ${{ steps.pr_details.outputs.head_sha }}
+    # - name: checkout repo
+    #   uses: actions/checkout@v3
+    #   # if: ${{ !env.ACT }}
+    #   with:
+    #     ref: ${{ steps.pr_details.outputs.head_sha }}
     - name: migration approvals
       shell: bash
       run: node $GITHUB_ACTION_PATH/dist/index.js
-      env:
-        REPO_TOKEN: ${{ inputs.repo-token }}
-        DEBUG: ${{ inputs.debug }}
-        MIGRATION_CONFIG_DIR: ${{ inputs.migration-config-file }}
-        APPROVAL_TEAMS: ${{ inputs.approval-teams }}
-        PR_BASE_BRANCH: ${{ inputs.pr-base-branch }}
-        PR_LABELS: ${{ steps.pr_details.outputs.labels }}
-        AWS_ACCESS_KEY_ID: ${{ ${{ inputs.aws-access-key-id }}
-        AWS_SECRET_ACCESS_KEY: ${{ ${{ inputs.aws-access-key-secret }}
-        AWS_REGION: ${{ ${{ inputs.aws-region }}
-        AWS_ENDPOINT_URL: ${{ ${{ inputs.aws-endpoint-url }}
+      # env:
+        # REPO_TOKEN: ${{ inputs.repo_token }}
+        # MIGRATION_CONFIG_FILE: ${{ inputs.migration_config_file }}
+        # AWS_ACCESS_KEY_ID: ${{ ${{ inputs.aws_access_key_id }}
+        # AWS_SECRET_ACCESS_KEY: ${{ ${{ inputs.aws_access_key_secret }}
+        # AWS_REGION: ${{ ${{ inputs.aws_region }}
+        # AWS_ENDPOINT_URL: ${{ ${{ inputs.aws_endpoint_url }}
+        # DEBUG: ${{ inputs.debug }}

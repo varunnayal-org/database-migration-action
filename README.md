@@ -34,11 +34,11 @@ need to perform some initial setup steps before you can develop your action.
 >
 > You'll need to have a reasonably modern version of
 > [Node.js](https://nodejs.org) handy (20.x or later should work!). If you are
-> using a version manager like [`nodenv`](https://github.com/nodenv/nodenv) or
-> [`nvm`](https://github.com/nvm-sh/nvm), this template has a `.node-version`
+> using a version manager like [`nvm`](https://github.com/nvm-sh/nvm) or
+> [`nvm`](https://github.com/nvm-sh/nvm), this template has a `.nvmrc`
 > file at the root of the repository that will be used to automatically switch
 > to the correct version when you `cd` into the repository. Additionally, this
-> `.node-version` file is used by GitHub Actions in any `actions/setup-node`
+> `.nvmrc` file is used by GitHub Actions in any `actions/setup-node`
 > actions.
 
 1. :hammer_and_wrench: Install the dependencies
@@ -164,8 +164,6 @@ steps:
   - name: Test Local Action
     id: test-action
     uses: ./
-    with:
-      milliseconds: 1000
 
   - name: Print Output
     id: output
@@ -195,8 +193,6 @@ steps:
   - name: Test Local Action
     id: test-action
     uses: actions/typescript-action@v1 # Commit with the `v1` tag
-    with:
-      milliseconds: 1000
 
   - name: Print Output
     id: output

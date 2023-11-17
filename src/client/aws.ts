@@ -1,16 +1,17 @@
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager'
+import { getInput } from '../util'
 
 export type AWSSecrets = Record<string, string>
 
 class Client {
   #secretManager: SecretsManagerClient
 
-  constructor(
-    accessKeyId: string | undefined = process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: string | undefined = process.env.AWS_SECRET_ACCESS_KEY,
-    endpointURL: string | undefined = process.env.AWS_ENDPOINT_URL,
-    region: string = process.env.AWS_REGION || 'ap-south-1'
-  ) {
+  constructor(accessKeyId?: string, secretAccessKey?: string, region?: string, endpointURL?: string) {
+    accessKeyId = accessKeyId || getInput('aws_access_key_id', '')
+    secretAccessKey = secretAccessKey || getInput('aws_access_key_secret', '')
+    region = region || getInput('aws_region', 'ap-south-1')
+    endpointURL = endpointURL || getInput('aws_endpoint_url', '')
+
     let credentials
     if (accessKeyId && secretAccessKey) {
       credentials = { accessKeyId, secretAccessKey }

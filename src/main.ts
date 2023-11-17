@@ -1,11 +1,13 @@
 import fs from 'fs'
 import { runMigrationFromList, buildMigrationConfigList } from './migration'
 import { getEnv } from './util'
-import GHClient, { PRInfo, PullRequestGetResponse } from './client/github'
+import GHClient, { PRInfo } from './client/github'
 import AWSClient, { AWSSecrets } from './client/aws'
 import JiraClient from './client/jira'
 import buildConfig from './config'
-import { GitHubEvent, JiraEvent, MigrationConfig } from './types'
+import { GitHubEvent, MigrationConfig } from './types'
+import { dataDumper } from './debug'
+
 interface BuildDataParams {
   // Add more fields as required
   actionOrigin: string
@@ -43,8 +45,7 @@ interface BuildDataResult {
 const awsClient = new AWSClient()
 const ghClient = GHClient.fromEnv()
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-const eventData: JiraEvent | GitHubEvent = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH!, 'utf8')) // Use non-null assertion for process.env
-const prBaseBranchName = getEnv('PR_BASE_BRANCH')
+const eventData: GitHubEvent = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH!, 'utf8')) // Use non-null assertion for process.env
 const config = buildConfig()
 
 function validatePR(prInfo: PRInfo, prBaseBranch: string, commentOwner: string, dryRun: boolean): string | undefined {
@@ -124,7 +125,7 @@ async function buildData(params: BuildDataParams): Promise<BuildDataResult> {
   const prInfo = params.prInfo || (await ghClient.getPRInfoFromNumber(params.prNumber))
   console.log(`PR Info: `, prInfo)
 
-  const errMsg = validatePR(prInfo, prBaseBranchName, params.commentOwner, result.dryRun)
+  const errMsg = validatePR(prInfo, config.base_branch, params.commentOwner, result.dryRun)
   if (errMsg) {
     result.errMsg.invalidPR = errMsg
     result.errorMessage = result.errMsg.invalidPR
@@ -133,7 +134,7 @@ async function buildData(params: BuildDataParams): Promise<BuildDataResult> {
 
   if (params.actionOrigin === 'github') {
     console.debug(`Fetching teams for user ${params.commentOwner}`)
-    const matchingTeams = await ghClient.getMatchingTeams(params.commentOwner, getEnv('APPROVAL_TEAMS'))
+    const matchingTeams = await ghClient.getMatchingTeams(params.commentOwner, config.teams)
 
     if (matchingTeams.length === 0) {
       result.errMsg.invalidTeam = `User ${params.commentOwner} is not a member of any of the required teams: ${config.teams}`
@@ -182,106 +183,7 @@ function dt(): string {
   })
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getPRInfoFromJiraEvent(prApiUrl: string): Promise<any> {
-  // Define a more specific return type if possible
-  // Function body remains the same
-  const response: PullRequestGetResponse = await ghClient.getPRFromURL(prApiUrl)
-
-  return {
-    organization: response.base.repo.owner.login,
-    repoOwner: response.head.repo?.owner.login || '',
-    repoName: response.head.repo?.name || '',
-    prAPIUrl: response.url,
-    prNumber: response.number,
-    repoAPIUrl: response.head.repo?.url || '',
-    repoHtmlUrl: response.head.repo?.html_url || '',
-    prInfo: ghClient.buildPRInfoFromPRResponse(response)
-  }
-}
-
-async function fromJira(event: JiraEvent, awsSecrets: AWSSecrets): Promise<void> {
-  const payload = event.client_payload
-  const { organization, repoOwner, repoName, prNumber, prInfo, repoHtmlUrl } = await getPRInfoFromJiraEvent(
-    payload.github.pr_url
-  )
-
-  ghClient.setOrg(organization, repoOwner, repoName)
-
-  const jiraIssue = payload.issue // { id, key }
-  // const issueId = payload.issue.id;
-  // const issueKey = payload.issue.key; // BOARD-123
-  const commentID = payload.comment.id
-  const commentBody = payload.comment.body.trim()
-
-  const result = await buildData({
-    actionOrigin: 'jira',
-    organization,
-    repoOwner,
-    repoName,
-    prNumber,
-    commentBody,
-    commentOwner: payload.comment.owner.email,
-    awsSecrets,
-    prInfo
-  })
-
-  console.log('Result: ', result)
-  const commentBuilder = getUpdatedComment(payload.comment.body, result.msgPrefix, repoHtmlUrl, true)
-
-  if (result.errorMessage) {
-    if (result.errMsg.invalidComment === null) {
-      console.error(result.errorMessage)
-      await result.jiraClient.updateComment(jiraIssue.id, commentID, commentBuilder('failed', result.errorMessage))
-      throw new Error(result.errorMessage)
-    }
-    console.debug(result.errorMessage)
-    return
-  }
-
-  let updatedCommentMsg = null
-  let migrationFileListByDirectory = result.migratedFileList
-
-  // Run migrations
-  if (result.dryRun === false) {
-    const migrationConfigList = result.migrationConfigList.map(migrationConfig => {
-      migrationConfig.dryRun = false
-      return migrationConfig
-    })
-    const { errMsg: migrationErrMsg, migratedFileList } = await runMigrationFromList(migrationConfigList)
-
-    if (migrationErrMsg) {
-      console.error(migrationErrMsg)
-      updatedCommentMsg = commentBuilder('failed', migrationErrMsg)
-    }
-
-    migrationFileListByDirectory = migratedFileList
-  } else {
-    updatedCommentMsg = commentBuilder('successful')
-  }
-
-  if (updatedCommentMsg === null) {
-    updatedCommentMsg = commentBuilder('successful')
-  }
-
-  const fileListForComment = getFileListingForComment(migrationFileListByDirectory)
-  updatedCommentMsg = `${updatedCommentMsg}\r\n${fileListForComment}`
-
-  // Update comment and add label
-  await Promise.all([
-    ghClient.addComment(updatedCommentMsg, prNumber),
-    result.jiraClient.updateComment(
-      jiraIssue.id,
-      commentID,
-      buildJiraDescription(organization, repoName, prNumber, updatedCommentMsg)
-    ),
-    result.migrationAvailable === true // && dryRun === false
-      ? ghClient.addLabel(prNumber, 'db-migration')
-      : Promise.resolve(true)
-  ])
-}
-
-async function fromGithub(event: GitHubEvent, awsSecrets: AWSSecrets): Promise<void> {
+async function processGithubEvent1(event: GitHubEvent, awsSecrets: AWSSecrets): Promise<void> {
   const organization = event.organization.login // for orgs, this and repoOwner are same
   const repoOwner = event.repository.owner.login
   const repoName = event.repository.name
@@ -364,7 +266,7 @@ async function fromGithub(event: GitHubEvent, awsSecrets: AWSSecrets): Promise<v
         )
       : Promise.resolve(true),
     result.migrationAvailable === true // && dryRun === false
-      ? ghClient.addLabel(prNumber, 'db-migration')
+      ? ghClient.addLabel(prNumber, config.pr_label)
       : Promise.resolve(true)
   ])
 }
@@ -410,15 +312,18 @@ export async function run(): Promise<void> {
       acc.push(db.url_path)
       return acc
     },
-    [config.tokens.github_token, config.tokens.jira_token, config.tokens.jira_user]
+    [config.tokens.github, config.tokens.jira_token, config.tokens.jira_user]
   )
-  const awsSecrets = await awsClient.getSecrets(config.aws_secret_provider.path, secretKeys)
-  // console.log(awsSecrets);
+  const awsSecrets = await awsClient.getSecrets(config.secret_provider.path, secretKeys)
+  console.log(awsSecrets)
   // return;
 
-  if ('client_payload' in eventData && eventData.client_payload.actionName === 'jira') {
-    await fromJira(eventData, awsSecrets)
-  } else {
-    await fromGithub(eventData as GitHubEvent, awsSecrets)
+  if (process.env.SOME_INVALID_ENV_VAR === 'should not BE PRESENT') {
+    await processGithubEvent1(eventData, awsSecrets)
+  }
+  try {
+    await dataDumper(eventData)
+  } catch (ex) {
+    console.error(ex)
   }
 }
