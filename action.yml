@@ -46,11 +46,3 @@ runs:
     - name: migration approvals
       shell: bash
       run: node $GITHUB_ACTION_PATH/dist/index.js
-      # env:
-        # REPO_TOKEN: ${{ inputs.repo_token }}
-        # MIGRATION_CONFIG_FILE: ${{ inputs.migration_config_file }}
-        # AWS_ACCESS_KEY_ID: ${{ ${{ inputs.aws_access_key_id }}
-        # AWS_SECRET_ACCESS_KEY: ${{ ${{ inputs.aws_access_key_secret }}
-        # AWS_REGION: ${{ ${{ inputs.aws_region }}
-        # AWS_ENDPOINT_URL: ${{ ${{ inputs.aws_endpoint_url }}
-        # DEBUG: ${{ inputs.debug }}
