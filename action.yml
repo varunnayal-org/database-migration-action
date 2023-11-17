@@ -35,6 +35,10 @@ runs:
     - name: Print GitHub Context
       shell: bash
       run: echo "${{ toJson(github) }}"
+    - name: Print GitHub Env
+      shell: bash
+      run: |
+        env
     # - name: Fetch PR details
     #   id: pr_details
     #   shell: bash
