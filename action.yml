@@ -63,3 +63,5 @@ runs:
     - name: migration approvals
       shell: bash
       run: node $GITHUB_ACTION_PATH/dist/index.js
+      env:
+        REPO_TOKEN: ${{ inputs.repo_token }}
