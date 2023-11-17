@@ -41,7 +41,10 @@ runs:
       env:
         REPO_TOKEN: ${{ inputs.repo_token }}
       run: |
+        pwd
         ls -ltrha
+        ls -ltrha ..
+        ls -ltrha ../..
 
     # - name: Fetch PR details
     #   id: pr_details
