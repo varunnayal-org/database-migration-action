@@ -76,8 +76,9 @@ export interface PRInfo {
 }
 
 function buildOctokit(token: string, opts: OctokitOptions = {}): GithubClient {
+  const debugStr = getInput('debug', 'false').toLowerCase()
   return getOctokit(token, {
-    debug: core.getBooleanInput('debug'),
+    debug: debugStr === 'true' || debugStr === '1',
     ...opts
   })
 }

@@ -62954,8 +62954,9 @@ const core = __importStar(__nccwpck_require__(42186));
 const github_1 = __nccwpck_require__(95438);
 const util_1 = __nccwpck_require__(92629);
 function buildOctokit(token, opts = {}) {
+    const debugStr = (0, util_1.getInput)('debug', 'false').toLowerCase();
     return (0, github_1.getOctokit)(token, {
-        debug: core.getBooleanInput('debug'),
+        debug: debugStr === 'true' || debugStr === '1',
         ...opts
     });
 }
