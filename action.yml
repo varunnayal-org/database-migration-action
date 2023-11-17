@@ -29,18 +29,13 @@ inputs:
     default: 'false'
 
 runs:
+  # composite doesn't inject INPUT_* variables automatically
   using: composite
   # using: node20
   steps:
     - name: Print GitHub Context
       shell: bash
       run: echo "${{ toJson(github) }}"
-    - name: Print GitHub Env
-      shell: bash
-      env:
-        REPO_TOKEN: ${{ inputs.repo_token }}
-      run: |
-        env
     # - name: Fetch PR details
     #   id: pr_details
     #   shell: bash
@@ -66,4 +61,9 @@ runs:
       shell: bash
       run: node $GITHUB_ACTION_PATH/dist/index.js
       env:
-        REPO_TOKEN: ${{ inputs.repo_token }}
+        INPUT_REPO_TOKEN: ${{ inputs.repo_token }}
+        INPUT_MIGRATION_CONFIG_FILE: ${{ inputs.migration_config_file }}
+        INPUT_AWS_ACCESS_KEY_ID: ${{ inputs.aws_access_key_id }}
+        INPUT_AWS_ACCESS_KEY_SECRET: ${{ inputs.aws_access_key_secret }}
+        INPUT_AWS_ENDPOINT_URL: ${{ inputs.aws_endpoint_url }}
+        INPUT_DEBUG: ${{ inputs.debug }}
