@@ -63500,6 +63500,8 @@ async function dataDumper(eventData) {
     const data = {
         ghContext: github.context,
         eventData,
+        // https://github.com/varunnayal-org/go-svc/actions/runs/6902697670/attempts/5
+        executionURL: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`,
         envVars: {
             GITHUB_HEAD_REF: process.env.GITHUB_HEAD_REF,
             /**
@@ -63527,6 +63529,7 @@ async function dataDumper(eventData) {
             GITHUB_RUN_ID: process.env.GITHUB_RUN_ID,
             // A unique number for each run of a particular workflow in a repository. This number begins at 1 for the workflow's first run, and increments with each new run. This number does not change if you re-run the workflow run. For example, 3.
             GITHUB_RUN_NUMBER: process.env.GITHUB_RUN_NUMBER,
+            GITHUB_RUN_ATTEMPT: process.env.GITHUB_RUN_ATTEMPT,
             // The commit SHA that triggered the workflow. The value of this commit SHA depends on the event that triggered the workflow
             GITHUB_SHA: process.env.GITHUB_SHA,
             GITHUB_EVENT_PATH: process.env.GITHUB_EVENT_PATH,
