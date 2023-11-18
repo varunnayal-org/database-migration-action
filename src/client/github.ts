@@ -1,7 +1,7 @@
 import * as core from '@actions/core'
 
 import { getOctokit } from '@actions/github'
-import { getEnv } from '../util'
+import { getEnv, getInput } from '../util'
 // eslint-disable-next-line import/no-unresolved
 import { OctokitOptions } from '@octokit/core/dist-types/types'
 // eslint-disable-next-line import/named
@@ -76,7 +76,7 @@ export interface PRInfo {
 }
 
 function buildOctokit(token: string, opts: OctokitOptions = {}): GithubClient {
-  const debugStr = process.env.DEBUG || 'false'
+  const debugStr = getInput('debug', 'false').toLowerCase()
   return getOctokit(token, {
     debug: debugStr === 'true' || debugStr === '1',
     ...opts
@@ -94,7 +94,7 @@ class Github {
   }
 
   static fromEnv(opts?: OctokitOptions): Github {
-    return new Github(getEnv('REPO_TOKEN'), opts)
+    return new Github(getInput('repo_token'), opts)
   }
 
   setOrg(organization: string, repoOwner: string, repoName: string): this {

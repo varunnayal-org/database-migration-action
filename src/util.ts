@@ -32,4 +32,15 @@ function getEnv(envName: string, fromState: NodeJS.ProcessEnv = process.env): st
   return value
 }
 
-export { createTempDir, removeDir, cleanDir, getEnv }
+function getInput(name: string, defaultValue?: string): string {
+  const value = core.getInput(name)
+  if (value !== '') {
+    return value
+  }
+  if (defaultValue === undefined) {
+    throw new Error(`Input ${name} is not set`)
+  }
+  return defaultValue
+}
+
+export { createTempDir, removeDir, cleanDir, getEnv, getInput }
