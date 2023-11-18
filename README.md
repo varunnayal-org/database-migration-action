@@ -1,224 +1,193 @@
-# Create a GitHub Action Using TypeScript
+# DB Migration Action
 
-[![GitHub Super-Linter](https://github.com/actions/typescript-action/actions/workflows/linter.yml/badge.svg)](https://github.com/super-linter/super-linter)
-![CI](https://github.com/actions/typescript-action/actions/workflows/ci.yml/badge.svg)
-[![Check dist/](https://github.com/actions/typescript-action/actions/workflows/check-dist.yml/badge.svg)](https://github.com/actions/typescript-action/actions/workflows/check-dist.yml)
-[![CodeQL](https://github.com/actions/typescript-action/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/actions/typescript-action/actions/workflows/codeql-analysis.yml)
-[![Coverage](./badges/coverage.svg)](./badges/coverage.svg)
+## Features
 
-Use this template to bootstrap the creation of a TypeScript action. :rocket:
+1. Ensure auditable database migrations
+1. Ensure necessary approvals are in place before running the migrations. This is handled using GitHub teams
+1. List files being considered for migrations.
+1. Ignore draft PRs
+1. Trigger works when
+   1. When pull request is either opened, reopened or synchronized
+   2. When pull request is approved
 
-This template includes compilation support, tests, a validation workflow,
-publishing, and versioning guidance.
+## Integrations
 
-If you are new, there's also a simpler introduction in the
-[Hello world JavaScript action repository](https://github.com/actions/hello-world-javascript-action).
+### Github
 
-## Create Your Own Action
+#### Token Permission
 
-To create your own action, you can use this repository as a template! Just
-follow the below instructions:
+Create a classic token (Fine-grained token has not been tested). Permission scopes required
 
-1. Click the **Use this template** button at the top of the repository
-1. Select **Create a new repository**
-1. Select an owner and name for your new repository
-1. Click **Create repository**
-1. Clone your new repository
-
-## Initial Setup
-
-After you've cloned the repository to your local machine or codespace, you'll
-need to perform some initial setup steps before you can develop your action.
-
-> [!NOTE]
->
-> You'll need to have a reasonably modern version of
-> [Node.js](https://nodejs.org) handy (20.x or later should work!). If you are
-> using a version manager like [`nodenv`](https://github.com/nodenv/nodenv) or
-> [`nvm`](https://github.com/nvm-sh/nvm), this template has a `.node-version`
-> file at the root of the repository that will be used to automatically switch
-> to the correct version when you `cd` into the repository. Additionally, this
-> `.node-version` file is used by GitHub Actions in any `actions/setup-node`
-> actions.
-
-1. :hammer_and_wrench: Install the dependencies
-
-   ```bash
-   npm install
-   ```
-
-1. :building_construction: Package the TypeScript for distribution
-
-   ```bash
-   npm run bundle
-   ```
-
-1. :white_check_mark: Run the tests
-
-   ```bash
-   $ npm test
-
-   PASS  ./index.test.js
-     ✓ throws invalid number (3ms)
-     ✓ wait 500 ms (504ms)
-     ✓ test runs (95ms)
-
-   ...
-   ```
-
-## Update the Action Metadata
-
-The [`action.yml`](action.yml) file defines metadata about your action, such as
-input(s) and output(s). For details about this file, see
-[Metadata syntax for GitHub Actions](https://docs.github.com/en/actions/creating-actions/metadata-syntax-for-github-actions).
-
-When you copy this repository, update `action.yml` with the name, description,
-inputs, and outputs for your action.
-
-## Update the Action Code
-
-The [`src/`](./src/) directory is the heart of your action! This contains the
-source code that will be run when your action is invoked. You can replace the
-contents of this directory with your own code.
-
-There are a few things to keep in mind when writing your action code:
-
-- Most GitHub Actions toolkit and CI/CD operations are processed asynchronously.
-  In `main.ts`, you will see that the action is run in an `async` function.
-
-  ```javascript
-  import * as core from '@actions/core'
-  //...
-
-  async function run() {
-    try {
-      //...
-    } catch (error) {
-      core.setFailed(error.message)
-    }
-  }
-  ```
-
-  For more information about the GitHub Actions toolkit, see the
-  [documentation](https://github.com/actions/toolkit/blob/master/README.md).
-
-So, what are you waiting for? Go ahead and start customizing your action!
-
-1. Create a new branch
-
-   ```bash
-   git checkout -b releases/v1
-   ```
-
-1. Replace the contents of `src/` with your action code
-1. Add tests to `__tests__/` for your source code
-1. Format, test, and build the action
-
-   ```bash
-   npm run all
-   ```
-
-   > [!WARNING]
-   >
-   > This step is important! It will run [`ncc`](https://github.com/vercel/ncc)
-   > to build the final JavaScript action code with all dependencies included.
-   > If you do not run this step, your action will not work correctly when it is
-   > used in a workflow. This step also includes the `--license` option for
-   > `ncc`, which will create a license file for all of the production node
-   > modules used in your project.
-
-1. Commit your changes
-
-   ```bash
-   git add .
-   git commit -m "My first action is ready!"
-   ```
-
-1. Push them to your repository
-
-   ```bash
-   git push -u origin releases/v1
-   ```
-
-1. Create a pull request and get feedback on your action
-1. Merge the pull request into the `main` branch
-
-Your action is now published! :rocket:
-
-For information about versioning your action, see
-[Versioning](https://github.com/actions/toolkit/blob/master/docs/action-versioning.md)
-in the GitHub Actions toolkit.
-
-## Validate the Action
-
-You can now validate the action by referencing it in a workflow file. For
-example, [`ci.yml`](./.github/workflows/ci.yml) demonstrates how to reference an
-action in the same repository.
-
-```yaml
-steps:
-  - name: Checkout
-    id: checkout
-    uses: actions/checkout@v4
-
-  - name: Test Local Action
-    id: test-action
-    uses: ./
-    with:
-      milliseconds: 1000
-
-  - name: Print Output
-    id: output
-    run: echo "${{ steps.test-action.outputs.time }}"
-```
-
-For example workflow runs, check out the
-[Actions tab](https://github.com/actions/typescript-action/actions)! :rocket:
+- `repo:status`
+- `public_repo`
+- `read:org` : To read github teams
 
 ## Usage
 
-After testing, you can create version tag(s) that developers can use to
-reference different stable versions of your action. For more information, see
-[Versioning](https://github.com/actions/toolkit/blob/master/docs/action-versioning.md)
-in the GitHub Actions toolkit.
+1. Create a new github token and provide permissions mentioned [here](#token-permission)
+1. Go the repository or organization setting and add an encrypted variable named `MIGRATION_GITHUB_TOKEN` with the token obtained in previous step
+1. Add following workflow file
 
-To include the action in a workflow in another repository, you can use the
-`uses` syntax with the `@` symbol to reference a specific branch, tag, or commit
-hash.
+    <!-- TODO: Update if block and runs-on and uses and remove aws_* keys -->
+    ```yml
+    name: DB Migrations
+    on:
+      pull_request:
+        types: [opened, reopened, synchronize]
+      pull_request_review:
+        types: [submitted]
 
-```yaml
-steps:
-  - name: Checkout
-    id: checkout
-    uses: actions/checkout@v4
+    jobs:
+      db-migration-approval-flow:
+        runs-on: ubuntu-latest
+        if: |
+          (github.event_name == 'pull_request_review' && github.event.review.state == 'approved') ||
+          (github.event_name == 'pull_request')
+        name: DB Migration
+        steps:
+          - name: Approval check and migration run flow
+            uses: varunnayal-org/database-migration-action
+            # ## Used "run" command for local testing
+            # run: node database-migration-action/dist/index.js
+            env:
+              DB_URL: ${{ secrets.DB_CONNECTION_URL }}
+            with:
+              repo_token: ${{ secrets.MIGRATION_GITHUB_TOKEN }} # custom repo token
+              debug: ${{ env.DEBUG }} # defaults to false
+    ```
 
-  - name: Test Local Action
-    id: test-action
-    uses: actions/typescript-action@v1 # Commit with the `v1` tag
-    with:
-      milliseconds: 1000
+    Go the repository settings page and add `DB_CONNECTION_URL` secret variable.
 
-  - name: Print Output
-    id: output
-    run: echo "${{ steps.test-action.outputs.time }}"
+1. Add migration config file `db.migration.json`
+
+    ```jsonc
+    {
+      // Base directory where migrations are present
+      // Defaults: './migrations'
+      "base_directory": "./migrations",
+
+      // Ignore this for now
+      "secret_provider": {
+        "provider": "aws",
+        "path": "arn:aws:secretsmanager:ap-south-1:000000000000:secret:/prod/db-migration-secret-ymmjMl"
+      },
+
+      "tokens": {
+        "github": "GH_TOKEN"
+      },
+
+      // When PR is created, this label is added to PR for reporting purpose
+      // Default: db-migration
+      "pr_label": "db-migration",
+
+      // Base branch against which we
+      "pr_base_branch": "master",
+
+      // Teams that should approve the PR
+      // If "data" and "dba" is missing and only one team is provided, it is considered as the
+      // service owner team. In this case "data" and "dba" team will be added by default.
+      "teams": ["data", "dba", "go-svc-team"],
+
+
+      "databases": [
+        {
+          // directory within "base_directory" where migration files are present.
+          // If they are present in "base_directory", then use "."
+          // Default: "."
+          "directory": ".",
+
+          // Table to log migrations
+          // Default: "migrations"
+          "migration_table": "migrations",
+
+          "url_path": "DB_URL"
+        }
+      ]
+    }
+
+    ```
+
+## Local Development and Testing
+
+### Prerequisites
+
+1. Ensure sample event files are handy
+1. Install [nektos/act](https://github.com/nektos/act)
+1. Install localstack. Start is using command `localstack stard -d`.
+    > [!NOTE]
+    > We are not using AWS service, hence this step can be skipped.
+1. Setup postgres. Say, connection URL is `postgres://user:pass@localhost:5432/migration-db`
+1. Start `ngrok`. Use [ngrok.yml](https://ngrok.com/docs/agent/config/) or run `ngrok config check` to find configuration file location
+
+    ```sh
+    # Sample conf
+    cat ngrok.yml
+    version: "2"
+    authtoken: xxxxx
+    tunnels:
+      localstack:
+        addr: 4566
+        proto: http
+      postgres:
+        addr: 5432
+        proto: tcp
+    ```
+
+   1. Start ngrok using command `ngrok start --all`. Take note of `postgres` and `localstack` URL.
+   2. Say, PG_URL=`ngrok-pg-url`
+
+#### Testing from workflow repository
+
+Say, we want to test it wrt `go-svc` repo where workflow has been added.
+
+```sh
+cd go-svc
+
+git clone git@github.com:varunnayal-org/database-migration-action.git && \
+  cd database-migration-action && \
+  nvm use && \
+  npm ci
 ```
 
-## Publishing a new release
+Update workflow file
 
-This project includes a helper script designed to streamline the process of
-tagging and pushing new releases for GitHub Actions.
+```yml
+# Change
+uses: varunnayal-org/database-migration-action
 
-GitHub Actions allows users to select a specific version of the action to use,
-based on release tags. Our script simplifies this process by performing the
-following steps:
+# to
+uses: database-migration-action
+```
 
-1. **Retrieving the latest release tag:** The script starts by fetching the most
-   recent release tag by looking at the local data available in your repository.
-1. **Prompting for a new release tag:** The user is then prompted to enter a new
-   release tag. To assist with this, the script displays the latest release tag
-   and provides a regular expression to validate the format of the new tag.
-1. **Tagging the new release:** Once a valid new tag is entered, the script tags
-   the new release.
-1. **Pushing the new tag to the remote:** Finally, the script pushes the new tag
-   to the remote repository. From here, you will need to create a new release in
-   GitHub and users can easily reference the new tag in their workflows.
+Create Env File. Use sample [.env.description](./.env.description)
+
+```sh
+cd database-migration-action
+cp .env.description .env
+
+export ENV_FILE=`pwd`/.env
+```
+
+Use [nektos/act](https://github.com/nektos/act) to run actions.
+
+> `db-migration-approval-flow` is the job name define in workflow file
+
+1. To test PR created event
+
+    ```sh
+    act pull_request -v \
+      -j db-migration-approval-flow \
+      --input-file $ENV_FILE \
+      --secret-file $ENV_FILE \
+      -e /path/to/sample/pr-opened.json
+    ```
+
+1. To test PR approved event
+
+    ```sh
+    act pull_request_review -v \
+      -j db-migration-approval-flow \
+      --input-file $ENV_FILE \
+      --secret-file $ENV_FILE \
+      -e /path/to/sample/pr-approved.json
+    ```

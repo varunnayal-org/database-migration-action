@@ -1,5 +1,6 @@
 // #region GitHub
 export interface GitHubEvent {
+  action: string
   organization: {
     login: string
   }

@@ -1,6 +1,10 @@
 import path from 'path'
+import { getInput } from './util'
 
 export interface Config {
+  /**
+   * Directory where migrations are present
+   */
   base_directory: string
   tokens: TokenConfig
   jira: {
@@ -13,15 +17,28 @@ export interface Config {
     custom_field_pr_link: string
     custom_field_repo_link: string
   }
+
+  /**
+   * Base branch to which merging should occur
+   */
+  pr_base_branch: string
+  /**
+   * Label to add on PR
+   */
+  pr_label: string
+
+  /**
+   * Github teams allowed to approve PR
+   */
   teams: string[]
   databases: DatabaseConfig[]
-  aws_secret_provider: {
+  secret_provider: {
     path: string
   }
 }
 
 export interface TokenConfig {
-  github_token: string
+  github: string
   jira_token: string
   jira_user: string
 }
@@ -34,40 +51,39 @@ export interface DatabaseConfig {
 
 export default function buildConfig(): Config {
   // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires, import/no-dynamic-require
-  const config: Config = require(process.env.MIGRATION_CONFIG_FILE || path.join(process.cwd(), './db.migration.json'))
+  const config: Config = require(path.join(process.cwd(), getInput('migration_config_file', './db.migration.json')))
+
   if (!config.base_directory) {
-    config.base_directory = 'migrations'
+    config.base_directory = './migrations'
+  }
+  if (!config.pr_base_branch) {
+    config.pr_base_branch = 'main'
   }
 
   if (!config.tokens) {
+    // tokens
     config.tokens = {} as TokenConfig
   }
-  if (!config.tokens.github_token) {
-    config.tokens.github_token = 'GH_TOKEN'
-  }
-  if (!config.tokens.jira_token) {
-    config.tokens.jira_token = 'JIRA_TOKEN'
-  }
-  if (!config.tokens.jira_user) {
-    config.tokens.jira_user = 'JIRA_USER'
-  }
-
-  if (!config.jira) {
-    throw new Error('jira config is missing')
-  }
-  if (!config.jira.issue_type) {
-    config.jira.issue_type = 'Story'
-  }
-  if (!config.jira.ticket_label) {
-    config.jira.ticket_label = 'db-migration'
-  }
-
-  if (!config.base_directory) {
-    config.base_directory = 'migrations'
+  if (!config.tokens.github) {
+    config.tokens.github = 'GH_TOKEN'
   }
 
   if (!config.teams) {
     config.teams = []
+  }
+
+  if (config.pr_label) {
+    config.pr_label = 'db-migration'
+  }
+
+  // Only service team is added. Add default DBA and DATA team
+  if (config.teams.length === 1) {
+    config.teams.push('dba')
+    config.teams.push('data')
+  }
+
+  if (!Array.isArray(config.databases) || config.databases.length === 0) {
+    throw new Error('No databases configured')
   }
 
   config.databases.map(dbConfig => {
