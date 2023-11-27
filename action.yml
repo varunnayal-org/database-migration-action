@@ -13,6 +13,9 @@ inputs:
   migration_config_file:
     description: 'Migration configuration file'
     default: './db.migration.json'
+  atlas_version:
+    description: Atlas version
+    default: v0.15.0
   debug:
     description: 'show debug logs (true|false)'
     default: 'false'
@@ -81,6 +84,16 @@ runs:
     - name: checkout repo for PR Events
       if: (steps.checks.outputs.can_execute == '1' && steps.checks.outputs.pr_comment != '1')
       uses: actions/checkout@v3
+
+    - name: setup atlas
+      if: steps.checks.outputs.can_execute == '1'
+      shell: bash
+      run: curl -sSf https://atlasgo.sh | ATLAS_VERSION=${{inputs.atlas_version}} CI=true sh
+
+    - name: atlas exists
+      shell: bash
+      run: |
+        which atlas && atlas version
 
     - name: migration approvals
       if: steps.checks.outputs.can_execute == '1'

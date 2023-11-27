@@ -47,7 +47,7 @@ mkdir -p migrations
 
 atlas schema inspect \
   --format '{{ sql . " " }}' \
-  -u "${LOCAL_APP_DB}" > migrations/00000000000000_initial_schema.sql
+  -u "${LOCAL_APP_DB}" > migrations/`date '+%Y%m%d%H%M%S'`_initial_schema.sql
 ```
 
 **Note**:
