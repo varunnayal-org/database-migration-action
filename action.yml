@@ -5,73 +5,90 @@ branding:
   icon: 'database'
   color: 'purple'
 inputs:
-  repo-token:
-    description: 'Github token'
+  repo_token:
+    description: 'GitHub token'
     required: true
-  pr-base-branch:
-    description: 'Base branch on which DB migration action is available. You need to raise a PR for this branch as base branch.'
-    default: 'master'
-  migration-config-file:
+  aws_secret_store:
+    description: AWS Secret ID where database connection strings are stored
+  migration_config_file:
     description: 'Migration configuration file'
     default: './db.migration.json'
-  approval-teams:
-    description: 'List of teams that has authority to approve'
-    required: true
   debug:
     description: 'show debug logs (true|false)'
     default: 'false'
-  aws-access-key-id:
-    description: AWS Access Key ID
-    required: false
-  aws-access-key-secret:
-    description: AWS Access Secret
-    required: false
-  aws-region:
-    description: AWS Region
-    required: false
-    default: ap-south-1
-  aws-endpoint-url:
-    description: AWS API Endpoint URL
-    required: false
+  db_migration_echo_url:
+    description: 'Echo github context and payload to URL'
+    default: ''
 
 runs:
   using: composite
   steps:
-    - name: Print GitHub Context
+    # - name: Print GitHub Context
+    #   shell: bash
+    #   run: echo "${{ toJson(github) }}"
+    - name: setup event outputs
+      id: checks
       shell: bash
-      run: echo "${{ toJson(github) }}"
-    - name: Fetch PR details
+      run: |
+        pr_comment=${{
+          github.event_name == 'issue_comment' &&
+          github.event.issue.pull_request &&
+          startsWith(github.event.comment.body, 'db migrate') && '1' || '0'
+        }}
+        pr_review=${{
+          github.event_name == 'pull_request_review' &&
+          github.event.review.state == 'approved' &&
+          !github.event.pull_request.draft && '1' || '0'
+        }}
+        pr=${{
+          github.event_name == 'pull_request' &&
+          !github.event.pull_request.draft && '1' || '0'
+        }}
+
+        if [[ $pr_comment == '1' || $pr_review == '1' || $pr == '1' ]]; then
+          can_execute='1'
+        else
+          can_execute='0'
+        fi
+
+        echo "can_execute=$can_execute"
+
+        echo "pr_comment=$pr_comment" >> $GITHUB_OUTPUT
+        echo "pr_review=$pr_review" >> $GITHUB_OUTPUT
+        echo "pr=$pr" >> $GITHUB_OUTPUT
+        echo "can_execute=$can_execute" >> $GITHUB_OUTPUT
+
+    - name: Fetch PR details for PR Comment
       id: pr_details
       shell: bash
-      # if: ${{ !env.ACT }}
+      if: ${{ steps.checks.outputs.pr_comment == '1' }}
       env:
-        REPO_TOKEN: ${{ inputs.repo-token }}
+        REPO_TOKEN: ${{ inputs.repo_token }}
       run: |
-        PR_DETAILS=$(curl -s -L -H "Authorization: token $REPO_TOKEN" "${{ github.event.issue.pull_request.url }}")
-        # echo "PR_DETAILS=$PR_DETAILS" >> $GITHUB_ENV
-        echo "::set-output name=head_sha::$(echo "$PR_DETAILS" | jq -r .head.sha)"
-        echo "::set-output name=labels::$(echo "$PR_DETAILS" | jq -c .labels)"
-    - name: set head branch
-      shell: bash
-      # if: ${{ !env.ACT }}
-      run: |
-        echo ${{ steps.pr_details.outputs.head_sha }}
-    - name: checkout repo
+        PR_DETAILS=$(curl -s -L -H "Authorization: token $REPO_TOKEN" "${{ github.event.issue.pull_request.url }}" | jq -c .)
+        head_sha=$(echo $PR_DETAILS | jq -rc .head.sha)
+        labels=$(echo $PR_DETAILS | jq -rc .head.sha)
+        echo "PR_DETAILS=$PR_DETAILS" >> $GITHUB_ENV
+        echo "head_sha=$head_sha" >> $GITHUB_OUTPUT
+        echo "labels=$labels" >> $GITHUB_OUTPUT
+
+    - name: checkout repo for PR Comments
       uses: actions/checkout@v3
-      # if: ${{ !env.ACT }}
+      if: ${{ steps.checks.outputs.pr_comment == '1' }}
       with:
         ref: ${{ steps.pr_details.outputs.head_sha }}
+
+    - name: checkout repo for PR Events
+      if: (steps.checks.outputs.can_execute == '1' && steps.checks.outputs.pr_comment != '1')
+      uses: actions/checkout@v3
+
     - name: migration approvals
+      if: steps.checks.outputs.can_execute == '1'
       shell: bash
       run: node $GITHUB_ACTION_PATH/dist/index.js
       env:
-        REPO_TOKEN: ${{ inputs.repo-token }}
-        DEBUG: ${{ inputs.debug }}
-        MIGRATION_CONFIG_DIR: ${{ inputs.migration-config-file }}
-        APPROVAL_TEAMS: ${{ inputs.approval-teams }}
-        PR_BASE_BRANCH: ${{ inputs.pr-base-branch }}
-        PR_LABELS: ${{ steps.pr_details.outputs.labels }}
-        AWS_ACCESS_KEY_ID: ${{ ${{ inputs.aws-access-key-id }}
-        AWS_SECRET_ACCESS_KEY: ${{ ${{ inputs.aws-access-key-secret }}
-        AWS_REGION: ${{ ${{ inputs.aws-region }}
-        AWS_ENDPOINT_URL: ${{ ${{ inputs.aws-endpoint-url }}
+        INPUT_REPO_TOKEN: ${{ inputs.repo_token }}
+        INPUT_AWS_SECRET_STORE: ${{ inputs.aws_secret_store }}
+        INPUT_MIGRATION_CONFIG_FILE: ${{ inputs.migration_config_file }}
+        INPUT_DEBUG: ${{ inputs.debug }}
+        INPUT_DB_MIGRATION_ECHO_URL: ${{ inputs.db_migration_echo_url}}

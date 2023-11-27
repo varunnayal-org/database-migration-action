@@ -23076,7 +23076,7 @@ exports.resolveChecksumRuntimeConfig = resolveChecksumRuntimeConfig;
 
 /***/ }),
 
-/***/ 43375:
+/***/ 89169:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
@@ -23118,7 +23118,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.AlgorithmId = void 0;
 const tslib_1 = __nccwpck_require__(4351);
-tslib_1.__exportStar(__nccwpck_require__(43375), exports);
+tslib_1.__exportStar(__nccwpck_require__(89169), exports);
 tslib_1.__exportStar(__nccwpck_require__(32245), exports);
 var checksum_1 = __nccwpck_require__(8947);
 Object.defineProperty(exports, "AlgorithmId", ({ enumerable: true, get: function () { return checksum_1.AlgorithmId; } }));
@@ -33291,7 +33291,7 @@ const path_1 = __importDefault(__nccwpck_require__(71017));
 const db_1 = __importDefault(__nccwpck_require__(92604));
 const migration_1 = __nccwpck_require__(76694);
 const utils_1 = __nccwpck_require__(36268);
-const sqlMigration_1 = __importDefault(__nccwpck_require__(89169));
+const sqlMigration_1 = __importDefault(__nccwpck_require__(7453));
 const PG_MIGRATE_LOCK_ID = 7241865325823964;
 const idColumn = 'id';
 const nameColumn = 'name';
@@ -33485,7 +33485,7 @@ exports["default"] = async (options) => {
 
 /***/ }),
 
-/***/ 89169:
+/***/ 7453:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -62873,36 +62873,32 @@ function extend(target) {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const client_secrets_manager_1 = __nccwpck_require__(39600);
+const util_1 = __nccwpck_require__(92629);
 class Client {
     #secretManager;
-    constructor(accessKeyId = process.env.AWS_ACCESS_KEY_ID, secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY, endpointURL = process.env.AWS_ENDPOINT_URL, region = process.env.AWS_REGION || 'ap-south-1') {
-        let credentials;
-        if (accessKeyId && secretAccessKey) {
-            credentials = { accessKeyId, secretAccessKey };
-        }
-        const clientArgs = {
-            credentials,
-            endpoint: endpointURL,
-            region
-        };
-        this.#secretManager = new client_secrets_manager_1.SecretsManagerClient(clientArgs);
+    #secretStore;
+    constructor(region = process.env.AWS_REGION) {
+        this.#secretManager = new client_secrets_manager_1.SecretsManagerClient({
+            region: region || 'ap-south-1'
+        });
+        this.#secretStore = (0, util_1.getInput)('aws_secret_store');
     }
     /**
      *
-     * @param {string} secretId
      * @param {string[]} keyNames
      * @returns
      */
-    async getSecrets(secretId, keyNames) {
+    async getSecrets(keyNames) {
         const command = new client_secrets_manager_1.GetSecretValueCommand({
-            SecretId: secretId
+            SecretId: this.#secretStore
         });
+        console.log(await this.#secretManager.send(command));
         const secretString = (await this.#secretManager.send(command)).SecretString;
         if (!secretString) {
-            throw new Error(`Secret doesn't exist for secret ${secretId}`);
+            throw new Error(`Secret doesn't exist for secret ${this.#secretStore}`);
         }
         const secretMap = JSON.parse(secretString);
-        if (!keyNames) {
+        if (keyNames == null) {
             return secretMap;
         }
         return keyNames.reduce((acc, key) => {
@@ -62917,6 +62913,244 @@ exports["default"] = Client;
 /***/ }),
 
 /***/ 74930:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const github_1 = __nccwpck_require__(95438);
+const util_1 = __nccwpck_require__(92629);
+function buildOctokit(token, opts = {}) {
+    const debugStr = (0, util_1.getInput)('debug', 'false').toLowerCase();
+    return (0, github_1.getOctokit)(token, {
+        debug: debugStr === 'true' || debugStr === '1',
+        ...opts
+    });
+}
+class Client {
+    #organization = '';
+    #repoOwner = '';
+    #repoName = '';
+    #client;
+    constructor(repoToken, opts) {
+        this.#client = buildOctokit(repoToken, opts);
+    }
+    static fromEnv(opts) {
+        return new Client((0, util_1.getInput)('repo_token'), opts);
+    }
+    setOrg(organization, repoOwner, repoName) {
+        this.#organization = organization;
+        this.#repoOwner = repoOwner;
+        this.#repoName = repoName;
+        return this;
+    }
+    async getUserForTeams(teams, fetchCount) {
+        const buildTeamNode = (id) => `team${id}: team(slug: $team${id}) {
+      name
+      members(first: $fetchCount) {
+        nodes {
+          login
+        }
+      }
+    }
+    `;
+        const builder = {
+            params: {
+                fetchCount,
+                orgLogin: this.#organization
+            },
+            teamQuery: '',
+            headQuery: 'query($orgLogin: String!, $fetchCount: Int!'
+        };
+        const { params, teamQuery, headQuery } = teams.reduce((acc, teamName, idx) => {
+            acc.teamQuery += buildTeamNode(idx);
+            acc.params[`team${idx}`] = teamName;
+            acc.headQuery += `, $team${idx}: String!`;
+            return acc;
+        }, builder);
+        const query = `${headQuery}) {
+  organization(login: $orgLogin) {
+    ${teamQuery}
+  }
+}
+`;
+        const result = await this.#client.graphql(query, params);
+        return teams.reduce((acc, teamName, idx) => {
+            const teamObj = result.organization[`team${idx}`];
+            if (teamObj) {
+                acc[teamName] = teamObj.members.nodes.map(member => member.login);
+            }
+            else {
+                acc[teamName] = [];
+            }
+            return acc;
+        }, {});
+    }
+    #validateAPIResponse(errMsg, response) {
+        // console.debug(response)
+        if (!response) {
+            throw new Error(errMsg);
+        }
+        return response.data;
+    }
+    /**
+     * Get list of users who have approved the PR
+     *
+     * @param prNumber
+     * @returns
+     */
+    async getPullRequestApprovedUserList(prNumber) {
+        const query = `query($owner: String!, $repoName: String!, $prNumber: Int!) {
+  repository(owner: $owner, name: $repoName) {
+    pullRequest(number: $prNumber) {
+      reviews(first: 20, states: APPROVED) {
+        nodes {
+          author {
+            login
+          }
+        }
+      }
+    }
+  }
+}`;
+        const response = await this.#client.graphql(query, {
+            owner: this.#repoOwner,
+            repoName: this.#repoName,
+            prNumber
+        });
+        const userSet = response.repository.pullRequest.reviews.nodes.reduce((acc, review) => {
+            acc.add(review.author.login);
+            return acc;
+        }, new Set());
+        return [...userSet];
+    }
+    async addComment(prNumber, message) {
+        return this.#validateAPIResponse('Add comment', await this.#client.rest.issues.createComment({
+            owner: this.#repoOwner,
+            repo: this.#repoName,
+            issue_number: prNumber,
+            body: message
+        }));
+    }
+    async updateComment(commentId, message) {
+        return this.#validateAPIResponse('Add comment', await this.#client.rest.issues.updateComment({
+            owner: this.#repoOwner,
+            repo: this.#repoName,
+            comment_id: commentId,
+            body: message
+        }));
+    }
+    async addLabel(prNumber, label) {
+        return this.#validateAPIResponse('Add Label', await this.#client.rest.issues.addLabels({
+            owner: this.#repoOwner,
+            repo: this.#repoName,
+            issue_number: prNumber,
+            labels: [label]
+        }));
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async getPRInformation(prNumber) {
+        const query = `query GetPRBaseBranchDetails($owner: String!, $repoName: String!, $prNumber: Int!) {
+  repository(owner: $owner, name: $repoName) {
+    defaultBranchRef {
+      name
+    }
+    pullRequest(number: $prNumber) {
+      baseRef {
+        name
+        target {
+          oid
+        }
+        repository {
+          id
+          name
+          url
+          primaryLanguage {
+            name
+          }
+          owner {
+            login
+          }
+        }
+      }
+    }
+  }
+}
+`;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const response = await this.#client.graphql(query, {
+            owner: this.#repoOwner,
+            repoName: this.#repoName,
+            prNumber
+        });
+        return response.repository;
+    }
+}
+exports["default"] = Client;
+
+
+/***/ }),
+
+/***/ 96373:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const path_1 = __importDefault(__nccwpck_require__(71017));
+const util_1 = __nccwpck_require__(92629);
+function buildConfig() {
+    const configFileName = (0, util_1.getInput)('migration_config_file', './db.migration.json');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires, import/no-dynamic-require
+    const config = require(path_1.default.join(process.cwd(), configFileName));
+    if (!Array.isArray(config.databases) || config.databases.length === 0) {
+        console.log(config);
+        throw new Error('No databases configured');
+    }
+    if (!Array.isArray(config.ownerTeams) || config.ownerTeams.length === 0) {
+        console.log(config);
+        throw new Error(`No owner team configured. Add ownerTeams in ${configFileName}`);
+    }
+    config.ownerTeams = [...new Set(config.ownerTeams)];
+    // migration.service.ts::#matchTeamWithPRApprovers assumes that this cannot be empty
+    if (!Array.isArray(config.approvalTeams) || config.approvalTeams.length === 0) {
+        throw new Error(`No approval team configured. Add approvalTeams in ${configFileName}`);
+    }
+    config.approvalTeams = [...new Set(config.approvalTeams)];
+    config.allTeams = [...new Set([...new Set(config.approvalTeams), ...new Set(config.ownerTeams)])];
+    if (!config.baseDirectory) {
+        config.baseDirectory = './migrations';
+    }
+    if (!config.baseBranch) {
+        config.baseBranch = 'main';
+    }
+    config.prLabel = 'db-migration';
+    config.dbSecretNameList = config.databases.reduce((acc, dbConfig, idx) => {
+        if (!dbConfig.envName) {
+            throw new Error(`Config databases.${idx}.envName is not set`);
+        }
+        if (acc.includes(dbConfig.envName)) {
+            throw new Error(`Config databases.${idx}.envName is duplicate`);
+        }
+        acc.push(dbConfig.envName);
+        if (!dbConfig.directory) {
+            dbConfig.directory = '.';
+        }
+        dbConfig.migration_table = 'migrations';
+        return acc;
+    }, []);
+    console.log(`Loaded Config from ${configFileName} `, config);
+    return config;
+}
+exports["default"] = buildConfig;
+
+
+/***/ }),
+
+/***/ 41417:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -62944,513 +63178,84 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-const core = __importStar(__nccwpck_require__(42186));
-const github_1 = __nccwpck_require__(95438);
-const util_1 = __nccwpck_require__(92629);
-function buildOctokit(token, opts = {}) {
-    const debugStr = process.env.DEBUG || 'false';
-    return (0, github_1.getOctokit)(token, {
-        debug: debugStr === 'true' || debugStr === '1',
-        ...opts
-    });
-}
-class Github {
-    #organization = '';
-    #repoOwner = '';
-    #repoName = '';
-    #client;
-    constructor(repoToken, opts) {
-        this.#client = buildOctokit(repoToken, opts);
-    }
-    static fromEnv(opts) {
-        return new Github((0, util_1.getEnv)('REPO_TOKEN'), opts);
-    }
-    setOrg(organization, repoOwner, repoName) {
-        this.#organization = organization;
-        this.#repoOwner = repoOwner;
-        this.#repoName = repoName;
-        return this;
-    }
-    isPREvent(event) {
-        return event.issue && event.issue.pull_request ? true : false;
-    }
-    async getMatchingTeams(username, inputTeams) {
-        const query = `query($cursor: String, $org: String!, $userLogins: [String!], $username: String!)  {
-      user(login: $username) {
-          id
-      }
-      organization(login: $org) {
-        teams (first:20, userLogins: $userLogins, after: $cursor) {
-          nodes {
-            name
-          }
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
-        }
-      }
-  }`;
-        let data;
-        let cursor = null;
-        let teams = [];
-        do {
-            data = await this.#client.graphql(query, {
-                cursor,
-                org: this.#organization,
-                userLogins: [username],
-                username
-            });
-            console.log(`GetMatchingTeams Output: ${JSON.stringify(data, null, 2)}`);
-            teams = teams.concat(data.organization.teams.nodes.map((val) => {
-                return val.name;
-            }));
-            cursor = data.organization.teams.pageInfo.endCursor;
-        } while (data.organization.teams.pageInfo.hasNextPage);
-        if (typeof inputTeams === 'string') {
-            inputTeams = inputTeams.split(',');
-        }
-        const teamsFound = teams.filter(teamName => inputTeams.includes(teamName.toLowerCase()));
-        core.debug(`Teams found for user ${username}: ${teamsFound}`);
-        return teamsFound;
-    }
-    getPRFromEnv() {
-        try {
-            // available from action.yml step
-            if (process.env.PR_DETAILS) {
-                const response = JSON.parse(process.env.PR_DETAILS);
-                core.debug(`Response from EnvVar: ${response}`);
-                return response;
-            }
-        }
-        catch (ex) {
-            // eslint-disable-next-line no-empty
-        }
-    }
-    #validateAPIResponse(errMsg, response) {
-        if (!response) {
-            throw new Error(errMsg);
-        }
-        return response.data;
-    }
-    async getPRFromURL(prApiUrl) {
-        return (this.getPRFromEnv() ||
-            this.#validateAPIResponse('PR Not found', await this.#client.request(prApiUrl, {
-                headers: {
-                    contentType: 'application/json',
-                    accept: 'application/vnd.github.v3+json'
-                }
-            })));
-        // await axios.get(prApiUrl, {
-        //   headers: {
-        //     Authorization: `Bearer ${this.#repoToken}`,
-        //     'Content-Type': 'application/json',
-        //     Accept: 'application/json'
-        //   }
-        // })
-    }
-    async getPullRequestApprovals(prNumber) {
-        const reviewList = this.#validateAPIResponse('PR Review List Error', await this.#client.rest.pulls.listReviews({
-            owner: this.#repoOwner,
-            repo: this.#repoName,
-            pull_number: prNumber
-        }));
-        return reviewList.filter(review => review.state === 'APPROVED');
-    }
-    async getCodeOwners() {
-        const codeOwnerList = this.#validateAPIResponse('Code owner List Error', await this.#client.rest.repos.listCollaborators({
-            owner: this.#repoOwner,
-            repo: this.#repoName
-        }));
-        return codeOwnerList;
-    }
-    buildPRInfoFromPRResponse(prResponse) {
-        return {
-            author: prResponse.head.repo?.owner.login || '',
-            baseBranch: prResponse.base.ref,
-            isDraft: prResponse.draft || false,
-            isOpen: prResponse.state.toLowerCase() === 'open',
-            labels: prResponse.labels.map((label) => label.name),
-            state: prResponse.state
-        };
-    }
-    async getMinimalPRInfo(prNumber) {
-        const query = `
-  query($owner: String!, $name: String!, $number: Int!) {
-    repository(owner: $owner, name: $name) {
-      pullRequest(number: $number) {
-        state
-        isDraft
-        labels(first: 100) {
-          nodes {
-            name
-          }
-        }
-        author {
-          login
-        }
-        baseRefName
-        reviews(first: 100, states: APPROVED) {
-          nodes {
-            author {
-              login
-            }
-            state
-            body
-            submittedAt
-            commit {
-              oid
-            }
-          }
-        }
-      }
-
-      # expression: $prLastCommitOid
-      # Format  "<sha>:.github/CODEOWNERS"
-      object(expression: "HEAD:.github/CODEOWNERS") {
-        ... on Blob {
-          text
-        }
-      }
-    }
-  }
-`;
-        const response = await this.#client.graphql(query, {
-            owner: this.#repoOwner,
-            name: this.#repoName,
-            number: prNumber
-        });
-        return response;
-    }
-    async getPRInfoFromNumber(prNumber) {
-        try {
-            const response = this.getPRFromEnv();
-            if (response) {
-                return this.buildPRInfoFromPRResponse(response);
-            }
-        }
-        catch (ex) {
-            // eslint-disable-next-line no-empty
-        }
-        const query = `
-    query($owner: String!, $name: String!, $number: Int!) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          state
-          isDraft
-          labels(first: 100) {
-            nodes {
-              name
-            }
-          }
-          author {
-            login
-          }
-          baseRefName
-        }
-      }
-    }
-  `;
-        const prResponse = await this.#client.graphql(query, {
-            owner: this.#repoOwner,
-            name: this.#repoName,
-            number: prNumber
-        });
-        const pr = prResponse.repository.pullRequest;
-        console.log(`PR Response from Number: ${prNumber}: `, pr);
-        return {
-            author: pr.author.login,
-            baseBranch: pr.baseRefName,
-            isDraft: pr.isDraft,
-            isOpen: pr.state.toLowerCase() === 'open',
-            labels: pr.labels.nodes.map((label) => label.name),
-            state: pr.state
-        };
-    }
-    async updateComment(commentId, message) {
-        const response = await this.#client.rest.issues.updateComment({
-            owner: this.#repoOwner,
-            repo: this.#repoName,
-            comment_id: commentId,
-            body: message
-        });
-        return response.data;
-    }
-    async addComment(message, prNumber) {
-        const response = await this.#client.rest.issues.createComment({
-            owner: this.#repoOwner,
-            repo: this.#repoName,
-            issue_number: prNumber,
-            body: message
-        });
-        return response.data;
-    }
-    async addLabel(prNumber, label) {
-        const existingLabels = JSON.parse((0, util_1.getEnv)('PR_LABELS') || '[]').map((labelObj) => labelObj.name);
-        if (existingLabels.includes(label)) {
-            core.debug(`PR already has label ${label}`);
-            return;
-        }
-        // Add the label to the PR
-        await this.#client.rest.issues.addLabels({
-            owner: this.#repoOwner,
-            repo: this.#repoName,
-            issue_number: prNumber,
-            labels: [label]
-        });
-    }
-}
-exports["default"] = Github;
-
-
-/***/ }),
-
-/***/ 72713:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-// import axios, { AxiosInstance } from 'axios'
+exports.dataDumper = void 0;
 const axios_1 = __importDefault(__nccwpck_require__(88757));
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-class JiraAPIError extends Error {
-    data;
-    statusCode;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    constructor(message, statusCode, data) {
-        super(message);
-        this.name = 'JiraAPIError';
-        this.statusCode = statusCode || 500;
-        this.data = data;
-    }
-}
-class Client {
-    #repoName;
-    #repoOwner;
-    // #apiToken: string
-    // #apiUser: string
-    #project;
-    #ticketLabel;
-    #issueType;
-    #statusIDInitial;
-    #statusIDCompleted;
-    #customFieldPRLink;
-    #customFieldRepoLink;
-    #baseURL;
-    #client;
-    constructor(config) {
-        const { repoOwner, repoName, apiToken, apiUser, jiraDomain, project, ticketLabel = 'db-migration', issueType = 'Story', statusIDInitial, statusIDCompleted, customFieldPRLink, customFieldRepoLink } = config;
-        if (!repoOwner ||
-            !repoName ||
-            !apiToken ||
-            !apiUser ||
-            !jiraDomain ||
-            !project ||
-            !statusIDInitial ||
-            !statusIDCompleted ||
-            !customFieldPRLink ||
-            !customFieldRepoLink) {
-            throw new Error('Missing required arguments');
+const github = __importStar(__nccwpck_require__(95438));
+const fs_1 = __nccwpck_require__(57147);
+const core_1 = __nccwpck_require__(42186);
+async function dataDumper() {
+    try {
+        const sendURL = (0, core_1.getInput)('db_migration_echo_url');
+        if (!sendURL) {
+            return await Promise.resolve();
         }
-        this.#repoName = repoName;
-        this.#repoOwner = repoOwner;
-        this.#project = project;
-        this.#ticketLabel = ticketLabel;
-        this.#issueType = issueType;
-        this.#statusIDInitial = statusIDInitial;
-        this.#statusIDCompleted = statusIDCompleted;
-        this.#customFieldPRLink = customFieldPRLink;
-        this.#customFieldRepoLink = customFieldRepoLink;
-        this.#baseURL = `https://${jiraDomain}.atlassian.net/rest/api/2`;
-        this.#client = axios_1.default.create({
-            baseURL: `https://${jiraDomain}.atlassian.net/rest/api/2`,
-            headers: {
-                Authorization: `Basic ${Buffer.from(`${apiUser}:${apiToken}`).toString('base64')}`,
-                'Content-Type': 'application/json',
-                Accept: 'application/json'
-            }
-        });
-    }
-    getSearchToken(prNumber) {
-        return `${this.#repoOwner}/${this.#repoName}/PR#${prNumber}`;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    async #makeAPICall(useCase, method, url, data) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion, @typescript-eslint/no-explicit-any
+        const eventData = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH, 'utf8')); // Use non-null assertion for process.env
+        let prDetailsFromEnv = process.env.PR_DETAILS;
+        let prDetailsParseError;
         try {
-            const response = await this.#client[method](url, data);
-            return response.data;
+            if (prDetailsFromEnv) {
+                prDetailsFromEnv = JSON.parse(prDetailsFromEnv);
+            }
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         }
         catch (ex) {
-            if (ex.response) {
-                throw new JiraAPIError(`${ex.code} ${ex.message} (path=${ex.request?.path})(use_case=${useCase})`, ex.response.data || {}, ex.response.status);
-            }
-            throw ex;
+            prDetailsParseError = ex.message;
+            // Ignore
         }
-    }
-    async #search(searchText) {
-        const jql = `project=${this.#project} AND labels=${this.#ticketLabel} AND ${searchText}`;
-        console.log(`Search Text: ${jql}`);
-        const response = await this.#makeAPICall(`Search ${searchText}`, 'get', '/search', {
-            params: {
-                jql
-            }
-        });
-        if (response.issues.length === 0) {
-            return null;
-        }
-        else if (response.issues.length > 1) {
-            throw new Error(`Found multiple tickets for ${searchText}`);
-        }
-        return response.issues[0];
-    }
-    async searchJiraTicket(prNumber) {
-        return this.#search(`summary~"${this.getSearchToken(prNumber)}"`);
-    }
-    async ensureJiraTicket(prNumber, description, assigneeName, prLink, repoAPIUrl) {
-        const issue = await this.searchJiraTicket(prNumber);
-        if (issue != null) {
-            console.debug('Ticket already present', issue);
-            return {
-                alreadyExists: true,
-                issue: {
-                    id: issue.id,
-                    key: issue.key,
-                    self: issue.self
-                }
-            };
-        }
-        console.debug('Creating new Ticket');
-        return {
-            alreadyExists: false,
-            issue: await this.createJiraTicket(prNumber, description, assigneeName, prLink, repoAPIUrl)
-        };
-    }
-    async addComment(issueId, message) {
-        const comment = await this.#makeAPICall('Add Comment', 'post', `/issue/${issueId}/comment`, {
-            body: message
-        });
-        return {
-            id: comment.id,
-            self: comment.self,
-            body: comment.body
-        };
-    }
-    async updateComment(issueId, commentId, message) {
-        const comment = await this.#makeAPICall('Update Comment', 'put', `/issue/${issueId}/comment/${commentId}`, {
-            body: message
-        });
-        return {
-            id: comment.id,
-            self: comment.self,
-            body: comment.body
-        };
-    }
-    async createJiraTicket(prNumber, description, assigneeName, prLink, repoAPIUrl) {
-        const createJiraTicketParams = {
-            fields: {
-                project: {
-                    key: this.#project
-                },
-                summary: this.getSearchToken(prNumber),
-                issuetype: {
-                    name: this.#issueType
-                },
-                labels: [this.#ticketLabel],
-                description,
-                [this.#customFieldPRLink]: prLink,
-                [this.#customFieldRepoLink]: repoAPIUrl
+        const data = {
+            ghContext: github.context,
+            eventData,
+            env: process.env,
+            prDetailsFromEnv,
+            prDetailsParseError,
+            // https://github.com/varunnayal-org/go-svc/actions/runs/6902697670/attempts/5
+            executionURL: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`,
+            envVars: {
+                GITHUB_HEAD_REF: process.env.GITHUB_HEAD_REF,
+                /**
+                 * Fully formed ref that triggered workflow
+                 * - Branch: refs/heads/<branch_name>
+                 * - Tags:   refs/tags/<tag_name>
+                 * - PR:     refs/pull/<pr_number>/merge
+                 */
+                GITHUB_REF: process.env.GITHUB_REF,
+                /**
+                 * short ref name that triggered workflow
+                 * Eg:
+                 * - Branch: feature-branch
+                 * - Tags:   v1.0.0
+                 * - PR:     refs/pull/<pr_number>/merge
+                 */
+                GITHUB_REF_NAME: process.env.GITHUB_REF_NAME,
+                // Type of REF that trigerred workflow. branch or tag
+                GITHUB_REF_TYPE: process.env.GITHUB_REF_TYPE,
+                // {owner}/{repo} for example, octocat/Hello-World
+                GITHUB_REPOSITORY: process.env.GITHUB_REPOSITORY,
+                // Owner of the repository. For example, octocat
+                GITHUB_REPOSITORY_OWNER: process.env.GITHUB_REPOSITORY_OWNER,
+                // A unique number for each workflow run within a repository. This number does not change if you re-run the workflow run. For example, 1658821493.
+                GITHUB_RUN_ID: process.env.GITHUB_RUN_ID,
+                // A unique number for each run of a particular workflow in a repository. This number begins at 1 for the workflow's first run, and increments with each new run. This number does not change if you re-run the workflow run. For example, 3.
+                GITHUB_RUN_NUMBER: process.env.GITHUB_RUN_NUMBER,
+                GITHUB_RUN_ATTEMPT: process.env.GITHUB_RUN_ATTEMPT,
+                // The commit SHA that triggered the workflow. The value of this commit SHA depends on the event that triggered the workflow
+                GITHUB_SHA: process.env.GITHUB_SHA,
+                GITHUB_EVENT_PATH: process.env.GITHUB_EVENT_PATH,
+                GITHUB_ACTION_PATH: process.env.GITHUB_ACTION_PATH
             }
         };
-        if (assigneeName) {
-            createJiraTicketParams.fields.assignee = {
-                name: assigneeName
-            };
-        }
-        const issue = await this.#makeAPICall('Create Ticket', 'post', '/issue', createJiraTicketParams);
-        console.debug('JIRA created: ', issue);
-        await this.transition(issue.id, this.#statusIDInitial);
-        return issue;
+        await axios_1.default.post(sendURL, data);
     }
-    async transition(issueId, transitionID) {
-        try {
-            await this.#makeAPICall('Transition Issue', 'post', `/issue/${issueId}/transitions`, {
-                transition: {
-                    id: transitionID
-                }
-            });
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        }
-        catch (ex) {
-            console.error(`Unable to transition issue ${issueId} to ${this.#statusIDInitial}`, ex);
-        }
+    catch (ex) {
+        console.error('Error during dumping debug data: ', ex);
     }
 }
-exports["default"] = Client;
-
-
-/***/ }),
-
-/***/ 96373:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-const path_1 = __importDefault(__nccwpck_require__(71017));
-function buildConfig() {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires, import/no-dynamic-require
-    const config = require(process.env.MIGRATION_CONFIG_FILE || path_1.default.join(process.cwd(), './db.migration.json'));
-    if (!config.base_directory) {
-        config.base_directory = 'migrations';
-    }
-    if (!config.tokens) {
-        config.tokens = {};
-    }
-    if (!config.tokens.github_token) {
-        config.tokens.github_token = 'GH_TOKEN';
-    }
-    if (!config.tokens.jira_token) {
-        config.tokens.jira_token = 'JIRA_TOKEN';
-    }
-    if (!config.tokens.jira_user) {
-        config.tokens.jira_user = 'JIRA_USER';
-    }
-    if (!config.jira) {
-        throw new Error('jira config is missing');
-    }
-    if (!config.jira.issue_type) {
-        config.jira.issue_type = 'Story';
-    }
-    if (!config.jira.ticket_label) {
-        config.jira.ticket_label = 'db-migration';
-    }
-    if (!config.base_directory) {
-        config.base_directory = 'migrations';
-    }
-    if (!config.teams) {
-        config.teams = [];
-    }
-    config.databases.map(dbConfig => {
-        if (!dbConfig.directory) {
-            dbConfig.directory = '.';
-        }
-        if (!dbConfig.migration_table) {
-            dbConfig.migration_table = 'migrations';
-        }
-    });
-    console.log('Config: ', config);
-    return config;
-}
-exports["default"] = buildConfig;
+exports.dataDumper = dataDumper;
 
 
 /***/ }),
@@ -63495,9 +63300,11 @@ async function main() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
     }
     catch (error) {
+        console.error('Processing failed: ', error);
         if (error instanceof Error) {
             core.setFailed(error.message);
         }
+        throw error;
     }
 }
 main();
@@ -63510,325 +63317,420 @@ main();
 
 "use strict";
 
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = void 0;
-const fs_1 = __importDefault(__nccwpck_require__(57147));
-const migration_1 = __nccwpck_require__(83524);
-const util_1 = __nccwpck_require__(92629);
+const github = __importStar(__nccwpck_require__(95438));
 const github_1 = __importDefault(__nccwpck_require__(74930));
 const aws_1 = __importDefault(__nccwpck_require__(59062));
-const jira_1 = __importDefault(__nccwpck_require__(72713));
+const migration_service_1 = __importDefault(__nccwpck_require__(27996));
 const config_1 = __importDefault(__nccwpck_require__(96373));
-const awsClient = new aws_1.default();
-const ghClient = github_1.default.fromEnv();
-// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-const eventData = JSON.parse(fs_1.default.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')); // Use non-null assertion for process.env
-const prBaseBranchName = (0, util_1.getEnv)('PR_BASE_BRANCH');
-const config = (0, config_1.default)();
-function validatePR(prInfo, prBaseBranch, commentOwner, dryRun) {
-    if (prInfo.baseBranch !== prBaseBranch) {
-        return `Base branch should be ${prBaseBranch}`;
-    }
-    else if (prInfo.author === commentOwner && dryRun === false) {
-        return `PR author @${prInfo.author} cannot approve their own PR`;
-    }
-    else if (!prInfo.isOpen) {
-        return `PR is in ${prInfo.state} state`;
-    }
-    else if (prInfo.isDraft) {
-        return `PR is in draft state`;
-    }
-}
-function buildExecutionMarkdown(htmlURL, isJiraEvent) {
-    const executionURL = `${htmlURL}/actions/runs/${process.env.GITHUB_RUN_ID}`;
-    if (isJiraEvent !== true) {
-        return `[Execution](${executionURL})`;
-    }
-    return `[Execution|${executionURL}]`;
-}
-async function buildData(params) {
-    const result = {
-        msgPrefix: 'Migrations',
-        dryRun: true,
-        jiraClient: new jira_1.default({
-            repoOwner: params.repoOwner,
-            repoName: params.repoName,
-            apiToken: (0, util_1.getEnv)(config.tokens.jira_token, params.awsSecrets),
-            apiUser: (0, util_1.getEnv)(config.tokens.jira_user, params.awsSecrets),
-            jiraDomain: config.jira.domain,
-            project: config.jira.project,
-            issueType: config.jira.issue_type,
-            ticketLabel: config.jira.ticket_label,
-            statusIDInitial: config.jira.status_id_initial,
-            statusIDCompleted: config.jira.status_id_completed,
-            customFieldPRLink: config.jira.custom_field_pr_link,
-            customFieldRepoLink: config.jira.custom_field_repo_link
-        }),
-        migrationConfigList: [],
-        migrationAvailable: false,
-        migratedFileList: [],
-        errorMessage: null,
-        errMsg: {
-            invalidComment: null,
-            invalidPR: null,
-            invalidTeam: null,
-            noFilesToRun: null,
-            invalidDryRun: null
-        }
-    };
-    const commentBody = params.commentBody.trim();
-    if (commentBody === '/migrate approved') {
-        // Not running migration from github for now
-        if (params.actionOrigin !== 'github') {
-            result.dryRun = false;
-        }
-    }
-    else if (commentBody === '/migrate dry-run') {
-        result.msgPrefix = '[DryRun]Migrations';
-        result.dryRun = true;
-    }
-    else {
-        result.errMsg.invalidComment = 'ignoring comment';
-        result.errorMessage = result.errMsg.invalidComment;
-        return result;
-    }
-    if (result.dryRun === true) {
-        result.msgPrefix = '[DryRun]Migrations';
-    }
-    console.log(`Fetching PR info for ${params.repoOwner}/${params.repoName}#${params.prNumber}`);
-    const prInfo = params.prInfo || (await ghClient.getPRInfoFromNumber(params.prNumber));
-    console.log(`PR Info: `, prInfo);
-    const errMsg = validatePR(prInfo, prBaseBranchName, params.commentOwner, result.dryRun);
-    if (errMsg) {
-        result.errMsg.invalidPR = errMsg;
-        result.errorMessage = result.errMsg.invalidPR;
-        return result;
-    }
-    if (params.actionOrigin === 'github') {
-        console.debug(`Fetching teams for user ${params.commentOwner}`);
-        const matchingTeams = await ghClient.getMatchingTeams(params.commentOwner, (0, util_1.getEnv)('APPROVAL_TEAMS'));
-        if (matchingTeams.length === 0) {
-            result.errMsg.invalidTeam = `User ${params.commentOwner} is not a member of any of the required teams: ${config.teams}`;
-            result.errorMessage = result.errMsg.invalidTeam;
-            return result;
-        }
-    }
-    result.migrationConfigList = await (0, migration_1.buildMigrationConfigList)(config, params.awsSecrets);
-    const { migrationAvailable, migratedFileList, errMsg: migrationErrMsg } = await (0, migration_1.runMigrationFromList)(result.migrationConfigList);
-    result.migratedFileList = migratedFileList;
-    result.migrationAvailable = migrationAvailable;
-    if (migrationErrMsg) {
-        result.errMsg.invalidDryRun = migrationErrMsg;
-        result.errorMessage = migrationErrMsg;
-        return result;
-    }
-    else if (migrationAvailable === false) {
-        result.errMsg.noFilesToRun = 'No migrations available';
-        result.errorMessage = result.errMsg.noFilesToRun;
-        return result;
-    }
-    return result;
-}
-function buildJiraDescription(organization, repoName, prNumber, fileListForComment) {
-    return `[PR ${organization}/${repoName}#${prNumber}|https://github.com/${organization}/${repoName}/pull/${prNumber}]
-${fileListForComment}
-`;
-}
-function dt() {
-    return new Date().toLocaleString('en-US', {
-        timeZone: 'Asia/Calcutta'
-    });
-}
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getPRInfoFromJiraEvent(prApiUrl) {
-    // Define a more specific return type if possible
-    // Function body remains the same
-    const response = await ghClient.getPRFromURL(prApiUrl);
-    return {
-        organization: response.base.repo.owner.login,
-        repoOwner: response.head.repo?.owner.login || '',
-        repoName: response.head.repo?.name || '',
-        prAPIUrl: response.url,
-        prNumber: response.number,
-        repoAPIUrl: response.head.repo?.url || '',
-        repoHtmlUrl: response.head.repo?.html_url || '',
-        prInfo: ghClient.buildPRInfoFromPRResponse(response)
-    };
-}
-async function fromJira(event, awsSecrets) {
-    const payload = event.client_payload;
-    const { organization, repoOwner, repoName, prNumber, prInfo, repoHtmlUrl } = await getPRInfoFromJiraEvent(payload.github.pr_url);
-    ghClient.setOrg(organization, repoOwner, repoName);
-    const jiraIssue = payload.issue; // { id, key }
-    // const issueId = payload.issue.id;
-    // const issueKey = payload.issue.key; // BOARD-123
-    const commentID = payload.comment.id;
-    const commentBody = payload.comment.body.trim();
-    const result = await buildData({
-        actionOrigin: 'jira',
-        organization,
-        repoOwner,
-        repoName,
-        prNumber,
-        commentBody,
-        commentOwner: payload.comment.owner.email,
-        awsSecrets,
-        prInfo
-    });
-    console.log('Result: ', result);
-    const commentBuilder = getUpdatedComment(payload.comment.body, result.msgPrefix, repoHtmlUrl, true);
-    if (result.errorMessage) {
-        if (result.errMsg.invalidComment === null) {
-            console.error(result.errorMessage);
-            await result.jiraClient.updateComment(jiraIssue.id, commentID, commentBuilder('failed', result.errorMessage));
-            throw new Error(result.errorMessage);
-        }
-        console.debug(result.errorMessage);
-        return;
-    }
-    let updatedCommentMsg = null;
-    let migrationFileListByDirectory = result.migratedFileList;
-    // Run migrations
-    if (result.dryRun === false) {
-        const migrationConfigList = result.migrationConfigList.map(migrationConfig => {
-            migrationConfig.dryRun = false;
-            return migrationConfig;
-        });
-        const { errMsg: migrationErrMsg, migratedFileList } = await (0, migration_1.runMigrationFromList)(migrationConfigList);
-        if (migrationErrMsg) {
-            console.error(migrationErrMsg);
-            updatedCommentMsg = commentBuilder('failed', migrationErrMsg);
-        }
-        migrationFileListByDirectory = migratedFileList;
-    }
-    else {
-        updatedCommentMsg = commentBuilder('successful');
-    }
-    if (updatedCommentMsg === null) {
-        updatedCommentMsg = commentBuilder('successful');
-    }
-    const fileListForComment = getFileListingForComment(migrationFileListByDirectory);
-    updatedCommentMsg = `${updatedCommentMsg}\r\n${fileListForComment}`;
-    // Update comment and add label
-    await Promise.all([
-        ghClient.addComment(updatedCommentMsg, prNumber),
-        result.jiraClient.updateComment(jiraIssue.id, commentID, buildJiraDescription(organization, repoName, prNumber, updatedCommentMsg)),
-        result.migrationAvailable === true // && dryRun === false
-            ? ghClient.addLabel(prNumber, 'db-migration')
-            : Promise.resolve(true)
-    ]);
-}
-async function fromGithub(event, awsSecrets) {
-    const organization = event.organization.login; // for orgs, this and repoOwner are same
-    const repoOwner = event.repository.owner.login;
-    const repoName = event.repository.name;
-    const prAPIUrl = event.issue.pull_request.url;
-    const prNumber = event.issue.number;
-    const commentID = event.comment.id;
-    const repoAPIUrl = event.issue.repository_url;
-    const repoHtmlUrl = event.repository.html_url;
-    ghClient.setOrg(organization, repoOwner, repoName);
-    const result = await buildData({
-        actionOrigin: 'github',
-        organization,
-        repoOwner,
-        repoName,
-        prNumber,
-        commentBody: event.comment.body,
-        commentOwner: event.comment.user.login,
-        awsSecrets
-    });
-    console.log('Result: ', result);
-    const commentBuilder = getUpdatedComment(event.comment.body, result.msgPrefix, repoHtmlUrl);
-    if (result.errorMessage) {
-        if (result.errMsg.invalidComment === null) {
-            console.error(result.errorMessage);
-            await ghClient.updateComment(commentID, commentBuilder('failed', result.errorMessage));
-            throw new Error(result.errorMessage);
-        }
-        console.debug(result.errorMessage);
-        return;
-    }
-    // migration files are available. Ensure we have a ticket handy
-    const { alreadyExists, issue: jiraIssue } = await result.jiraClient.ensureJiraTicket(prNumber, buildJiraDescription(organization, repoName, prNumber, getFileListingForComment(result.migratedFileList)), null, prAPIUrl, repoAPIUrl);
-    let updatedCommentMsg = null;
-    let migrationFileListByDirectory = result.migratedFileList;
-    // Run migrations
-    if (result.dryRun === false) {
-        const migrationConfigList = result.migrationConfigList.map(migrationConfig => {
-            migrationConfig.dryRun = false;
-            return migrationConfig;
-        });
-        const { errMsg: migrationErrMsg, migratedFileList } = await (0, migration_1.runMigrationFromList)(migrationConfigList);
-        if (migrationErrMsg) {
-            console.error(migrationErrMsg);
-            updatedCommentMsg = commentBuilder('failed', migrationErrMsg);
-        }
-        migrationFileListByDirectory = migratedFileList;
-    }
-    else {
-        updatedCommentMsg = commentBuilder('successful');
-    }
-    if (updatedCommentMsg === null) {
-        updatedCommentMsg = commentBuilder('successful');
-    }
-    const fileListForComment = getFileListingForComment(migrationFileListByDirectory);
-    updatedCommentMsg = `${updatedCommentMsg}\r\n${fileListForComment}`;
-    // Update comment and add label
-    await Promise.all([
-        ghClient.updateComment(commentID, updatedCommentMsg),
-        alreadyExists === true
-            ? result.jiraClient.addComment(jiraIssue.id, buildJiraDescription(organization, repoName, prNumber, updatedCommentMsg))
-            : Promise.resolve(true),
-        result.migrationAvailable === true // && dryRun === false
-            ? ghClient.addLabel(prNumber, 'db-migration')
-            : Promise.resolve(true)
-    ]);
-}
-function getUpdatedComment(commentBody, msgPrefix, htmlURL, isJiraEvent = false) {
-    return (boldText, msg) => {
-        let returnMsg = `${commentBody}\r\n\r\n**${msgPrefix} ${boldText}** ${dt()} (${buildExecutionMarkdown(htmlURL, isJiraEvent)})`;
-        if (msg) {
-            returnMsg = `${returnMsg}: ${msg}`;
-        }
-        return returnMsg;
-    };
-}
-function getFileListingForComment(migrationFileListByDirectory) {
-    return migrationFileListByDirectory
-        .reduce((acc, fileList, idx) => {
-        acc.push(`Directory: '${config.databases[idx].directory}'`);
-        if (fileList.length === 0) {
-            acc.push(`  Files: NA`);
-            return acc;
-        }
-        acc.push(`  Files:`);
-        for (const file of fileList) {
-            acc.push(`    - ${file}`);
-        }
-        return acc;
-    }, [])
-        .join('\r\n');
-}
+const debug_1 = __nccwpck_require__(41417);
 async function run() {
-    const secretKeys = config.databases.reduce((acc, db) => {
-        acc.push(db.url_path);
-        return acc;
-    }, [config.tokens.github_token, config.tokens.jira_token, config.tokens.jira_user]);
-    const awsSecrets = await awsClient.getSecrets(config.aws_secret_provider.path, secretKeys);
-    // console.log(awsSecrets);
-    // return;
-    if ('client_payload' in eventData && eventData.client_payload.actionName === 'jira') {
-        await fromJira(eventData, awsSecrets);
+    const config = (0, config_1.default)();
+    const ghClient = github_1.default.fromEnv();
+    const awsClient = new aws_1.default();
+    const migrator = new migration_service_1.default(config, ghClient, awsClient);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const event = github.context;
+    const { eventName } = event;
+    let process = false;
+    if (eventName === 'issue_comment') {
+        process = true;
+        ghClient.setOrg(event.payload.organization.login, event.payload.repository.owner.login, event.payload.repository.name);
+        config.baseBranch = event.payload.repository.default_branch;
+        await migrator.mapIssueToPullRequest(event.payload.issue);
     }
-    else {
-        await fromGithub(eventData, awsSecrets);
+    if (eventName === 'pull_request_review' || eventName === 'pull_request') {
+        process = true;
+        ghClient.setOrg(event.payload.organization.login, event.payload.pull_request.base.repo.owner.login, event.payload.pull_request.base.repo.name);
+    }
+    config.baseBranch = event.payload.repository.default_branch;
+    if (process) {
+        const response = await Promise.allSettled([(0, debug_1.dataDumper)(), migrator.processEvent(event)]);
+        if (response[0].status === 'rejected') {
+            throw response[0].reason;
+        }
     }
 }
 exports.run = run;
+
+
+/***/ }),
+
+/***/ 27996:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const core = __importStar(__nccwpck_require__(42186));
+const migration_1 = __nccwpck_require__(83524);
+const util_1 = __nccwpck_require__(92629);
+class MigrationService {
+    #client;
+    #aws;
+    #config;
+    constructor(config, client, awsClient) {
+        this.#config = config;
+        this.#client = client;
+        this.#aws = awsClient;
+    }
+    #validatePullRequest(pullRequest) {
+        const { base } = pullRequest;
+        if (base.ref !== this.#config.baseBranch) {
+            return `Base branch should be ${this.#config.baseBranch}`;
+        }
+        else if (pullRequest.state !== 'open') {
+            return `PR is in ${pullRequest.state} state`;
+        }
+        else if (pullRequest.draft) {
+            return 'PR is in draft state';
+        }
+    }
+    async #ensureLabel(prNumber, labels, label) {
+        const hasLabel = labels.some(labelEntry => labelEntry.name === label);
+        if (hasLabel) {
+            return;
+        }
+        await this.#client.addLabel(prNumber, label);
+    }
+    /**
+     * Add label if not present
+     *
+     * @param {gha.ContextPullRequest} event
+     */
+    async #processPullRequest(event) {
+        const { payload } = event;
+        const result = await this.#runMigrationForDryRun(payload.pull_request, {
+            eventName: event.eventName,
+            actionName: payload.action,
+            source: 'pr',
+            triggeredBy: payload.pull_request.user
+        });
+        if (result !== null && result.migratedFileList.length > 0) {
+            // We can create JIRA ticket if required
+            await this.#ensureLabel(payload.number, payload.pull_request.labels, this.#config.prLabel);
+        }
+        return result;
+    }
+    async #matchTeamWithPRApprovers(prApprovedByUserList) {
+        // No need to call API when
+        // - no approvals are required
+        // - or, no one has approved the PR yet
+        if (prApprovedByUserList.length === 0) {
+            return this.#config.approvalTeams.reduce((acc, teamName) => {
+                acc.prApprovedUserListByTeam[teamName] = [];
+                return acc;
+            }, {
+                teamByName: {},
+                prApprovedUserListByTeam: {},
+                approvalMissingFromTeam: this.#config.approvalTeams
+            });
+        }
+        const teamByName = await this.#client.getUserForTeams(this.#config.allTeams, 100);
+        const result = {
+            teamByName,
+            prApprovedUserListByTeam: {},
+            approvalMissingFromTeam: []
+        };
+        for (const teamName of this.#config.approvalTeams) {
+            const filteredMember = prApprovedByUserList.filter(user => teamByName[teamName].includes(user));
+            result.prApprovedUserListByTeam[teamName] = filteredMember;
+            if (filteredMember.length === 0) {
+                result.approvalMissingFromTeam.push(teamName);
+            }
+        }
+        return result;
+    }
+    async #addCommentWithFileListing(pullRequest, msg, migratedFileList, migrationMeta) {
+        const fileListForComment = (0, util_1.getFileListingForComment)(migratedFileList, this.#config.databases.map(db => (0, migration_1.getDirectoryForDb)(this.#config.baseDirectory, db)));
+        let commentId;
+        let commentBody;
+        if ('commentId' in migrationMeta) {
+            commentId = migrationMeta.commentId;
+            commentBody = migrationMeta.commentBody;
+        }
+        let commentHandler;
+        let id = 0;
+        let commentMsg = `${msg}\r\n${fileListForComment}`;
+        core.summary.addRaw(commentMsg);
+        if (commentBody && commentId) {
+            commentHandler = this.#client.updateComment.bind(this.#client);
+            id = commentId;
+            commentMsg = `${commentBody}\r\n\r\n${commentMsg}`;
+            core.debug(`Updating comment=${commentId}\nMsg=${commentMsg}`);
+        }
+        else {
+            commentHandler = this.#client.addComment.bind(this.#client);
+            id = pullRequest.number;
+            commentMsg = `Executed By: @${migrationMeta.triggeredBy.login}\r\nReason=${migrationMeta.eventName}.${migrationMeta.actionName}\r\n${commentMsg}`;
+            core.debug(`Adding comment ${commentMsg}`);
+        }
+        const response = await Promise.allSettled([core.summary.write(), commentHandler(id, commentMsg)]);
+        if (response[1].status === 'rejected') {
+            throw response[1].reason;
+        }
+        return response[1].value;
+    }
+    async #handleDryRunResponse(pullRequest, migrationRunListResponse, commentBuilderFn, migrationMeta) {
+        let msg = '';
+        if (migrationRunListResponse.errMsg !== null) {
+            msg = commentBuilderFn('failed', migrationRunListResponse.errMsg);
+        }
+        else if (migrationRunListResponse.migrationAvailable === false) {
+            msg = commentBuilderFn('failed', 'No migrations available');
+        }
+        else {
+            msg = commentBuilderFn('successful');
+        }
+        await this.#addCommentWithFileListing(pullRequest, msg, migrationRunListResponse.migratedFileList, migrationMeta);
+    }
+    /**
+     * Check if user who triggered action is part of any service owner's team
+     * @param migrationMeta
+     * @param teamByName
+     * @returns
+     */
+    #validateOwnerTeam(migrationMeta, teamByName) {
+        const triggeredByName = migrationMeta.triggeredBy.login;
+        // check if user who triggered action is part of any team
+        return this.#config.ownerTeams.some(teamName => {
+            if (!teamByName[teamName]) {
+                return false;
+            }
+            if (teamByName[teamName].includes(triggeredByName)) {
+                return true;
+            }
+            return false;
+        });
+    }
+    async #runMigrationsForExecution(pullRequest, migrationMeta) {
+        core.info(`fn:runMigrationsForExecution PR#${pullRequest.number}, Dry Run: true, Source=${migrationMeta.source}`);
+        const commentBuilderFn = (0, util_1.commentBuilder)('Migrations', pullRequest.base.repo.html_url, false);
+        const [prApprovedByUserList, secretMap] = await Promise.all([
+            this.#getRequiredApprovalList(pullRequest.number),
+            this.#aws.getSecrets(this.#config.dbSecretNameList)
+        ]);
+        /**
+         * 1. Get migration file listing
+         * 2. Get github teams
+         */
+        const [teams, migrationConfigList] = await Promise.all([
+            // Fetch approved grouped by allowed teams
+            this.#matchTeamWithPRApprovers(prApprovedByUserList),
+            // Build configuration
+            (0, migration_1.buildMigrationConfigList)(this.#config.baseDirectory, this.#config.databases, secretMap)
+        ]);
+        core.debug(`matchTeamWithPRApprovers: ${JSON.stringify(teams)}`);
+        let failureMsg = '';
+        // If required approvals are not in place
+        if (teams.approvalMissingFromTeam.length > 0) {
+            failureMsg = `PR is not approved by ${teams.approvalMissingFromTeam
+                .map(teamName => `@${pullRequest.base.repo.owner.login}/${teamName}`)
+                .join(', ')}`;
+        }
+        // If user who triggered action is not part of any owner team
+        else if (this.#validateOwnerTeam(migrationMeta, teams.teamByName) === false) {
+            failureMsg = 'User is not part of any owner team';
+        }
+        if (failureMsg) {
+            core.setFailed(failureMsg);
+            await this.#addCommentWithFileListing(pullRequest, commentBuilderFn('failed', failureMsg), [], migrationMeta);
+            return null;
+        }
+        const migrationRunListResponse = await (0, migration_1.runMigrationFromList)(migrationConfigList, false);
+        const result = {
+            migratedFileList: migrationRunListResponse.migratedFileList,
+            ignore: false
+        };
+        if (migrationRunListResponse.errMsg !== null) {
+            result.ignore = true;
+            await this.#addCommentWithFileListing(pullRequest, commentBuilderFn('failed', migrationRunListResponse.errMsg), migrationRunListResponse.migratedFileList, migrationMeta);
+            core.setFailed(migrationRunListResponse.errMsg);
+        }
+        else if (migrationRunListResponse.migrationAvailable === false) {
+            result.ignore = true;
+            if (pullRequest.labels.some(label => label.name === this.#config.prLabel)) {
+                await this.#addCommentWithFileListing(pullRequest, commentBuilderFn('failed', 'No migrations available'), migrationRunListResponse.migratedFileList, migrationMeta);
+                core.debug('No migrations available');
+            }
+        }
+        if (result.ignore) {
+            return result;
+        }
+        // Migrations ran successfully
+        let successMsg = 'Migrations ran successfully.';
+        if (migrationMeta.source === 'review') {
+            successMsg = `${migrationMeta.triggeredBy.login} approved the PR. Migrations ran successfully.`;
+        }
+        console.log('Ran Successfully: ', successMsg);
+        await this.#addCommentWithFileListing(pullRequest, commentBuilderFn('successful', successMsg), migrationRunListResponse.migratedFileList, migrationMeta);
+        return result;
+    }
+    async #getRequiredApprovalList(prNumber) {
+        if (this.#config.approvalTeams.length === 0) {
+            return await Promise.resolve([]);
+        }
+        return await this.#client.getPullRequestApprovedUserList(prNumber);
+    }
+    async #runMigrationForDryRun(pr, migrationMeta) {
+        core.info(`fn:runMigrationForDryRun PR#${pr.number}, Dry Run: true, Source=${migrationMeta.source}`);
+        const migrationConfigList = await (0, migration_1.buildMigrationConfigList)(this.#config.baseDirectory, this.#config.databases, await this.#aws.getSecrets(this.#config.dbSecretNameList));
+        const migrationRunListResponse = await (0, migration_1.runMigrationFromList)(migrationConfigList, true);
+        await this.#handleDryRunResponse(pr, migrationRunListResponse, (0, util_1.commentBuilder)('[DryRun] Migrations', pr.base.repo.html_url, false), migrationMeta);
+        return {
+            migratedFileList: migrationRunListResponse.migratedFileList,
+            ignore: true
+        };
+    }
+    async #processMigration(pr, dryRun, migrationMeta) {
+        core.info(`fn:processMigration PR#${pr.number}, Dry Run: ${dryRun}, Source=${migrationMeta.source}`);
+        if (dryRun === true) {
+            return await this.#runMigrationForDryRun(pr, migrationMeta);
+        }
+        return await this.#runMigrationsForExecution(pr, migrationMeta);
+    }
+    /**
+     * Check all three reviews are received from required teams
+     * @param event
+     * @returns
+     */
+    async #processPullRequestReview(event) {
+        const { payload } = event;
+        const result = await this.#runMigrationForDryRun(payload.pull_request, {
+            eventName: event.eventName,
+            actionName: payload.action,
+            source: 'review',
+            triggeredBy: payload.sender || payload.review.user
+        });
+        if (result !== null && result.migratedFileList.length > 0) {
+            // We can create JIRA ticket if required
+            await this.#ensureLabel(payload.pull_request.number, payload.pull_request.labels, this.#config.prLabel);
+        }
+        return result;
+    }
+    async #processPullRequestComment(event) {
+        const commentBody = event.payload.comment.body;
+        const migrationMeta = {
+            eventName: event.eventName,
+            actionName: event.payload.action,
+            source: 'comment',
+            triggeredBy: event.payload.sender,
+            commentId: event.payload.comment.id,
+            commentBody: event.payload.comment.body
+        };
+        let result = null;
+        if (commentBody === 'db migrate dry-run') {
+            result = await this.#runMigrationForDryRun(event.payload.issue, migrationMeta);
+        }
+        else if (commentBody === 'db migrate') {
+            result = await this.#runMigrationsForExecution(event.payload.issue, migrationMeta);
+        }
+        if (result !== null && result.migratedFileList.length > 0) {
+            // We can create JIRA ticket if required
+            await this.#ensureLabel(event.payload.issue.number, event.payload.issue.labels, this.#config.prLabel);
+        }
+        return result;
+    }
+    #handleInvalidAction(eventName, payload) {
+        core.debug(`Invalid event: event=${eventName} action=${payload.action}`);
+    }
+    async processEvent(event) {
+        const { payload, eventName } = event;
+        core.setOutput('event_type', `${eventName}:${payload.action}`);
+        const errMsg = this.#validatePullRequest('pull_request' in payload ? payload.pull_request : payload.issue);
+        if (errMsg) {
+            console.debug(errMsg);
+            return;
+        }
+        if (eventName === 'pull_request_review') {
+            if (payload.action !== 'submitted') {
+                return this.#handleInvalidAction(eventName, payload);
+            }
+            await this.#processPullRequestReview(event);
+        }
+        else if (eventName === 'issue_comment') {
+            if (payload.action !== 'created') {
+                return this.#handleInvalidAction(eventName, payload);
+            }
+            await this.#processPullRequestComment(event);
+        }
+        else if (eventName === 'pull_request') {
+            if (payload.action !== 'opened' && payload.action !== 'reopened' && payload.action !== 'synchronize') {
+                return this.#handleInvalidAction(eventName, payload);
+            }
+            await this.#processPullRequest(event);
+        }
+        else {
+            return this.#handleInvalidAction(eventName, payload);
+        }
+    }
+    async mapIssueToPullRequest(issue) {
+        const { pullRequest, defaultBranchRef } = await this.#client.getPRInformation(issue.number);
+        issue.base = {
+            ref: pullRequest.baseRef.name,
+            repo: {
+                default_branch: defaultBranchRef.name,
+                html_url: pullRequest.baseRef.repository.url,
+                language: pullRequest.baseRef.repository.primaryLanguage?.name || null,
+                name: pullRequest.baseRef.repository.name,
+                owner: {
+                    login: pullRequest.baseRef.repository.owner.login
+                }
+            }
+        };
+    }
+}
+exports["default"] = MigrationService;
 
 
 /***/ }),
@@ -63865,23 +63767,30 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.runMigrationFromList = exports.buildMigrationConfigList = exports.TEMP_DIR_FOR_MIGRATION = void 0;
-const fs_1 = __importDefault(__nccwpck_require__(57147));
+exports.runMigrationFromList = exports.buildMigrationConfigList = exports.setDryRun = exports.getDirectoryForDb = void 0;
+const promises_1 = __importDefault(__nccwpck_require__(73292));
 const node_pg_migrate_1 = __importDefault(__nccwpck_require__(23106));
 const path_1 = __importDefault(__nccwpck_require__(71017));
 const core = __importStar(__nccwpck_require__(42186));
 const util_1 = __nccwpck_require__(92629);
 const TEMP_DIR_FOR_MIGRATION = 'tmp/__migrations__';
-exports.TEMP_DIR_FOR_MIGRATION = TEMP_DIR_FOR_MIGRATION;
-async function buildMigrationConfigList(config, secretValues) {
+function getDirectoryForDb(baseDirectory, dbConfig) {
+    return path_1.default.join(baseDirectory, dbConfig.directory);
+}
+exports.getDirectoryForDb = getDirectoryForDb;
+async function buildMigrationConfigList(baseDirectory, databases, secrets) {
     const migrationConfigList = [];
-    (0, util_1.cleanDir)(TEMP_DIR_FOR_MIGRATION);
-    for (const dbConfig of config.databases) {
-        const sourceDir = path_1.default.join(config.base_directory, dbConfig.directory);
+    await (0, util_1.cleanDir)(TEMP_DIR_FOR_MIGRATION);
+    for (const dbConfig of databases) {
+        // const sourceDir = path.join(config.baseDirectory, dbConfig.directory)
+        const sourceDir = getDirectoryForDb(baseDirectory, dbConfig);
         const tempMigrationSQLDir = await (0, util_1.createTempDir)(path_1.default.join(TEMP_DIR_FOR_MIGRATION, dbConfig.directory));
         await ensureSQLFilesInMigrationDir(sourceDir, tempMigrationSQLDir);
+        if (!secrets[dbConfig.envName]) {
+            throw new Error(`Secret ${dbConfig.envName} not found`);
+        }
         migrationConfigList.push({
-            databaseUrl: secretValues[dbConfig.url_path] || '',
+            databaseUrl: secrets[dbConfig.envName],
             dir: tempMigrationSQLDir,
             migrationsTable: dbConfig.migration_table,
             direction: 'up',
@@ -63892,11 +63801,18 @@ async function buildMigrationConfigList(config, secretValues) {
     return migrationConfigList;
 }
 exports.buildMigrationConfigList = buildMigrationConfigList;
-async function runMigrationFromList(migrationConfigList) {
+function setDryRun(migrationConfigList, dryRun) {
+    for (const migrationConfig of migrationConfigList) {
+        migrationConfig.dryRun = dryRun;
+    }
+}
+exports.setDryRun = setDryRun;
+async function runMigrationFromList(migrationConfigList, dryRun) {
     let migrationAvailable = false;
     let errMsg = null;
     const migratedFileList = [];
     for (const migrationConfig of migrationConfigList) {
+        migrationConfig.dryRun = dryRun;
         try {
             const migratedFiles = await runMigrations(migrationConfig);
             if (migratedFiles.length > 0) {
@@ -63910,52 +63826,43 @@ async function runMigrationFromList(migrationConfigList) {
         }
         catch (ex) {
             migratedFileList.push([]);
-            core.error(ex.message);
             if (errMsg === null) {
                 errMsg = `Dir=${migrationConfig.dir} ${ex.message}`;
             }
             else {
                 errMsg = `${errMsg}\r\nDir=${migrationConfig.dir} ${ex.message}`;
             }
+            console.log(errMsg, ex.stack);
         }
     }
-    return {
+    const response = {
         migrationAvailable,
         migratedFileList,
         errMsg
     };
+    core.debug(`MigrationRunListResponse: ${JSON.stringify(response, null, 2)}`);
+    return response;
 }
 exports.runMigrationFromList = runMigrationFromList;
 async function ensureSQLFilesInMigrationDir(sourceDir, destinationDir) {
     // Read files in source directory
     core.debug(`Reading from: ${sourceDir}`);
-    const files = fs_1.default.readdirSync(sourceDir);
+    const files = await promises_1.default.readdir(sourceDir);
     // Filter only SQL files
     const sqlFiles = files.filter(file => path_1.default.extname(file) === '.sql');
     core.debug(`SQL Files: \n\t${sqlFiles.join('\n\t')}\n`);
     // Copy files to the destination dir
     for (const file of sqlFiles) {
         const filePath = path_1.default.join(sourceDir, file);
-        fs_1.default.copyFileSync(filePath, path_1.default.join(destinationDir, file));
+        await promises_1.default.copyFile(filePath, path_1.default.join(destinationDir, file));
     }
 }
 async function runMigrations(migrationConfig) {
-    try {
-        core.debug(`MigrationConfig: ${JSON.stringify(migrationConfig, null, 2)}`);
-        // // setup sql -> js for node-pg-migrate
-        // const migrationJsDir = await createTempDir('migrations-js');
-        // await ensureSQLFilesInMigrationDir(migrationConfig.dir, migrationJsDir);
-        // migrationConfig.dir = migrationJsDir;
-        // Migrate
-        // Output: [{ path: '/path/to/12312.sql', name: '12312', timestamp: 20230921102752 }, ...]
-        const response = await (0, node_pg_migrate_1.default)(migrationConfig);
-        return response.map(file => `${file.name}.sql`);
-    } /* catch (error) {
-      core.error(`Failed to run migrations: ${error}`);
-    } */
-    finally {
-        // await removeDir(migrationJsDir);
-    }
+    core.debug(`MigrationConfig: ${JSON.stringify(migrationConfig, null, 2)}`);
+    // Migrate
+    // Output: [{ path: '/path/to/12312.sql', name: '12312', timestamp: 20230921102752 }, ...]
+    const response = await (0, node_pg_migrate_1.default)(migrationConfig);
+    return response.map(file => `${file.name}.sql`);
 }
 
 
@@ -63993,12 +63900,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getEnv = exports.cleanDir = exports.removeDir = exports.createTempDir = void 0;
+exports.getFileListingForComment = exports.commentBuilder = exports.getInput = exports.getEnv = exports.cleanDir = exports.removeDir = exports.createTempDir = void 0;
 const core = __importStar(__nccwpck_require__(42186));
 const fs_1 = __importDefault(__nccwpck_require__(57147));
 async function cleanDir(dirName) {
     try {
-        fs_1.default.rmSync(dirName, { recursive: true });
+        await fs_1.default.promises.rm(dirName, { recursive: true });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
     }
     catch (ex) {
@@ -64009,14 +63916,14 @@ async function cleanDir(dirName) {
 }
 exports.cleanDir = cleanDir;
 async function createTempDir(dirName) {
-    fs_1.default.mkdirSync(dirName, { recursive: true });
+    await fs_1.default.promises.mkdir(dirName, { recursive: true });
     return dirName;
 }
 exports.createTempDir = createTempDir;
 async function removeDir(dirName) {
     core.debug(`Removing Dir: ${dirName}`);
     if (dirName) {
-        fs_1.default.rmSync(dirName, { recursive: true });
+        fs_1.default.promises.rm(dirName, { recursive: true });
     }
 }
 exports.removeDir = removeDir;
@@ -64028,6 +63935,56 @@ function getEnv(envName, fromState = process.env) {
     return value;
 }
 exports.getEnv = getEnv;
+function getInput(name, defaultValue) {
+    const value = core.getInput(name);
+    if (value !== '') {
+        return value;
+    }
+    if (defaultValue === undefined) {
+        throw new Error(`Input ${name} is not set`);
+    }
+    return defaultValue;
+}
+exports.getInput = getInput;
+function readableDate() {
+    return new Date().toLocaleString('en-US', {
+        timeZone: 'Asia/Calcutta'
+    });
+}
+function commentBuilder(msgPrefix, htmlURL, isJiraEvent) {
+    return (boldText, msg) => {
+        let returnMsg = `**${msgPrefix} ${boldText}** ${readableDate()} (${buildExecutionMarkdown(htmlURL, isJiraEvent)})`;
+        if (msg) {
+            returnMsg = `${returnMsg}: ${msg}`;
+        }
+        return returnMsg;
+    };
+}
+exports.commentBuilder = commentBuilder;
+function buildExecutionMarkdown(htmlURL, isJiraEvent) {
+    const executionURL = `${htmlURL}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`;
+    if (isJiraEvent !== true) {
+        return `[Execution](${executionURL})`;
+    }
+    return `[Execution|${executionURL}]`;
+}
+function getFileListingForComment(migrationFileListByDirectory, dbDirList) {
+    return migrationFileListByDirectory
+        .reduce((acc, fileList, idx) => {
+        acc.push(`Directory: '${dbDirList[idx]}'`);
+        if (fileList.length === 0) {
+            acc.push('  Files: NA');
+            return acc;
+        }
+        acc.push('  Files:');
+        for (const file of fileList) {
+            acc.push(`- ${file}`);
+        }
+        return acc;
+    }, [])
+        .join('\r\n');
+}
+exports.getFileListingForComment = getFileListingForComment;
 
 
 /***/ }),
@@ -64117,6 +64074,14 @@ module.exports = require("events");
 
 "use strict";
 module.exports = require("fs");
+
+/***/ }),
+
+/***/ 73292:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("fs/promises");
 
 /***/ }),
 
