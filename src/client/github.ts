@@ -1,89 +1,28 @@
-import * as core from '@actions/core'
-
 import { getOctokit } from '@actions/github'
-import { getEnv } from '../util'
+import { getInput } from '../util'
 // eslint-disable-next-line import/no-unresolved
 import { OctokitOptions } from '@octokit/core/dist-types/types'
 // eslint-disable-next-line import/named
 import { RestEndpointMethodTypes } from '@octokit/rest'
 // eslint-disable-next-line import/no-unresolved
 import { OctokitResponse } from '@octokit/types'
-import { MinimalPRInfo } from '../types'
 
-export type GithubClient = ReturnType<typeof getOctokit> // InstanceType<typeof GitHub>
-export type PullRequestGetResponse = RestEndpointMethodTypes['pulls']['get']['response']['data']
-export type IssueUpdateCommentResponse = RestEndpointMethodTypes['issues']['updateComment']['response']['data']
+type GithubClient = ReturnType<typeof getOctokit> // InstanceType<typeof GitHub>
+
 export type IssueCreateCommentResponse = RestEndpointMethodTypes['issues']['createComment']['response']['data']
-export type IssueAddLabelResponse = RestEndpointMethodTypes['issues']['addLabels']['response']['data']
-export type PullRequestGetReviewList = RestEndpointMethodTypes['pulls']['listReviews']['response']['data']
-export type RepoGetCollaboratorListResponse = RestEndpointMethodTypes['repos']['listCollaborators']['response']['data']
-
-export interface GithubPRCommentMinimal {
-  action: string
-  comment: {
-    body: string
-    id: number
-    user: {
-      login: string
-    }
-  }
-  issue: {
-    number: number
-    pull_request: {
-      url: string
-    }
-    repository_url: string
-    user_not_required: {
-      login: string
-    }
-  }
-  organization: {
-    login: string
-  }
-  repository: {
-    name: string
-    html_url: string
-    owner: {
-      login: string
-    }
-  }
-  sender_not_required: {
-    login: string
-  }
-}
-
-export interface MatchingTeamsResponse {
-  organization: {
-    teams: {
-      nodes: {
-        name: string
-      }[]
-      pageInfo: {
-        hasNextPage: boolean
-        endCursor: string
-      }
-    }
-  }
-}
-
-export interface PRInfo {
-  author: string
-  baseBranch: string
-  isDraft: boolean
-  isOpen: boolean
-  labels: string[]
-  state: string
-}
+export type IssueUpdateCommentResponse = RestEndpointMethodTypes['issues']['updateComment']['response']['data']
+type IssueAddLabelResponse = RestEndpointMethodTypes['issues']['addLabels']['response']['data']
+type GetUserForTeamsResponse = Record<string, string[]>
 
 function buildOctokit(token: string, opts: OctokitOptions = {}): GithubClient {
-  const debugStr = process.env.DEBUG || 'false'
+  const debugStr = getInput('debug', 'false').toLowerCase()
   return getOctokit(token, {
     debug: debugStr === 'true' || debugStr === '1',
     ...opts
   })
 }
 
-class Github {
+class Client {
   #organization = ''
   #repoOwner = ''
   #repoName = ''
@@ -93,8 +32,8 @@ class Github {
     this.#client = buildOctokit(repoToken, opts)
   }
 
-  static fromEnv(opts?: OctokitOptions): Github {
-    return new Github(getEnv('REPO_TOKEN'), opts)
+  static fromEnv(opts?: OctokitOptions): Client {
+    return new Client(getInput('repo_token'), opts)
   }
 
   setOrg(organization: string, repoOwner: string, repoName: string): this {
@@ -104,284 +43,179 @@ class Github {
     return this
   }
 
-  isPREvent(event: GithubPRCommentMinimal): boolean {
-    return event.issue && event.issue.pull_request ? true : false
-  }
-
-  async getMatchingTeams(username: string, inputTeams: string[] | string): Promise<string[]> {
-    const query = `query($cursor: String, $org: String!, $userLogins: [String!], $username: String!)  {
-      user(login: $username) {
-          id
-      }
-      organization(login: $org) {
-        teams (first:20, userLogins: $userLogins, after: $cursor) {
-          nodes {
-            name
-          }
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
+  async getUserForTeams(teams: string[], fetchCount: number): Promise<GetUserForTeamsResponse> {
+    const buildTeamNode = (id: number): string => `team${id}: team(slug: $team${id}) {
+      name
+      members(first: $fetchCount) {
+        nodes {
+          login
         }
       }
-  }`
-
-    let data: MatchingTeamsResponse
-    let cursor = null
-    let teams: string[] = []
-    do {
-      data = await this.#client.graphql<MatchingTeamsResponse>(query, {
-        cursor,
-        org: this.#organization,
-        userLogins: [username],
-        username
-      })
-
-      console.log(`GetMatchingTeams Output: ${JSON.stringify(data, null, 2)}`)
-
-      teams = teams.concat(
-        data.organization.teams.nodes.map((val: { name: string }) => {
-          return val.name
-        })
-      )
-
-      cursor = data.organization.teams.pageInfo.endCursor
-    } while (data.organization.teams.pageInfo.hasNextPage)
-
-    if (typeof inputTeams === 'string') {
-      inputTeams = inputTeams.split(',')
     }
-    const teamsFound = teams.filter(teamName => inputTeams.includes(teamName.toLowerCase()))
-    core.debug(`Teams found for user ${username}: ${teamsFound}`)
-    return teamsFound
+    `
+
+    const builder: {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      params: { fetchCount: number; orgLogin: string; [key: string]: any }
+      teamQuery: string
+      headQuery: string
+    } = {
+      params: {
+        fetchCount,
+        orgLogin: this.#organization
+      },
+      teamQuery: '',
+      headQuery: 'query($orgLogin: String!, $fetchCount: Int!'
+    }
+
+    const { params, teamQuery, headQuery } = teams.reduce((acc, teamName, idx) => {
+      acc.teamQuery += buildTeamNode(idx)
+      acc.params[`team${idx}`] = teamName
+      acc.headQuery += `, $team${idx}: String!`
+      return acc
+    }, builder)
+
+    const query = `${headQuery}) {
+  organization(login: $orgLogin) {
+    ${teamQuery}
   }
+}
+`
+    const result: {
+      organization: Record<string, { members: { nodes: { login: string }[] } }>
+    } = await this.#client.graphql(query, params)
 
-  getPRFromEnv(): PullRequestGetResponse | undefined {
-    try {
-      // available from action.yml step
-      if (process.env.PR_DETAILS) {
-        const response = JSON.parse(process.env.PR_DETAILS) as PullRequestGetResponse
-        core.debug(`Response from EnvVar: ${response}`)
-        return response
+    return teams.reduce<GetUserForTeamsResponse>((acc, teamName, idx) => {
+      const teamObj = result.organization[`team${idx}`]
+      if (teamObj) {
+        acc[teamName] = teamObj.members.nodes.map(member => member.login)
+      } else {
+        acc[teamName] = []
       }
-    } catch (ex) {
-      // eslint-disable-next-line no-empty
-    }
+      return acc
+    }, {})
   }
 
   #validateAPIResponse<T>(errMsg: string, response: OctokitResponse<T>): T {
+    // console.debug(response)
     if (!response) {
       throw new Error(errMsg)
     }
     return response.data
   }
 
-  async getPRFromURL(prApiUrl: string): Promise<PullRequestGetResponse> {
-    return (
-      this.getPRFromEnv() ||
-      this.#validateAPIResponse(
-        'PR Not found',
-        await this.#client.request(prApiUrl, {
-          headers: {
-            contentType: 'application/json',
-            accept: 'application/vnd.github.v3+json'
-          }
-        })
-      )
-    )
-
-    // await axios.get(prApiUrl, {
-    //   headers: {
-    //     Authorization: `Bearer ${this.#repoToken}`,
-    //     'Content-Type': 'application/json',
-    //     Accept: 'application/json'
-    //   }
-    // })
-  }
-
-  async getPullRequestApprovals(prNumber: number): Promise<PullRequestGetReviewList> {
-    const reviewList = this.#validateAPIResponse(
-      'PR Review List Error',
-      await this.#client.rest.pulls.listReviews({
-        owner: this.#repoOwner,
-        repo: this.#repoName,
-        pull_number: prNumber
-      })
-    )
-
-    return reviewList.filter(review => review.state === 'APPROVED')
-  }
-
-  async getCodeOwners(): Promise<RepoGetCollaboratorListResponse> {
-    const codeOwnerList = this.#validateAPIResponse(
-      'Code owner List Error',
-      await this.#client.rest.repos.listCollaborators({
-        owner: this.#repoOwner,
-        repo: this.#repoName
-      })
-    )
-    return codeOwnerList
-  }
-
-  buildPRInfoFromPRResponse(prResponse: PullRequestGetResponse): PRInfo {
-    return {
-      author: prResponse.head.repo?.owner.login || '',
-      baseBranch: prResponse.base.ref,
-      isDraft: prResponse.draft || false,
-      isOpen: prResponse.state.toLowerCase() === 'open',
-      labels: prResponse.labels.map((label: PullRequestGetResponse['labels'][number]) => label.name),
-      state: prResponse.state
-    }
-  }
-
-  async getMinimalPRInfo(prNumber: number): Promise<MinimalPRInfo> {
-    const query = `
-  query($owner: String!, $name: String!, $number: Int!) {
-    repository(owner: $owner, name: $name) {
-      pullRequest(number: $number) {
-        state
-        isDraft
-        labels(first: 100) {
-          nodes {
-            name
-          }
-        }
-        author {
-          login
-        }
-        baseRefName
-        reviews(first: 100, states: APPROVED) {
-          nodes {
-            author {
-              login
-            }
-            body
-            submittedAt
-            commit {
-              oid
-            }
-          }
-        }
-      }
-
-      # expression: $prLastCommitOid
-      # Format  "<sha>:.github/CODEOWNERS"
-      object(expression: "HEAD:.github/CODEOWNERS") {
-        ... on Blob {
-          text
-        }
-      }
-    }
-  }
-`
-    return await this.#client.graphql<MinimalPRInfo>(query, {
-      owner: this.#repoOwner,
-      name: this.#repoName,
-      number: prNumber
-    })
-  }
-
-  async getPRInfoFromNumber(prNumber: number): Promise<PRInfo> {
-    try {
-      const response = this.getPRFromEnv()
-      if (response) {
-        return this.buildPRInfoFromPRResponse(response)
-      }
-    } catch (ex) {
-      // eslint-disable-next-line no-empty
-    }
-
-    const query = `
-    query($owner: String!, $name: String!, $number: Int!) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          state
-          isDraft
-          labels(first: 100) {
-            nodes {
-              name
-            }
-          }
+  /**
+   * Get list of users who have approved the PR
+   *
+   * @param prNumber
+   * @returns
+   */
+  async getPullRequestApprovedUserList(prNumber: number): Promise<string[]> {
+    const query = `query($owner: String!, $repoName: String!, $prNumber: Int!) {
+  repository(owner: $owner, name: $repoName) {
+    pullRequest(number: $prNumber) {
+      reviews(first: 20, states: APPROVED) {
+        nodes {
           author {
             login
           }
-          baseRefName
         }
       }
     }
-  `
-
-    const prResponse: {
-      repository: {
-        pullRequest: {
-          author: {
-            login: string
-          }
-          baseRefName: string
-          isDraft: boolean
-          state: string
-          labels: {
-            nodes: {
-              name: string
-            }[]
-          }
-        }
-      }
+  }
+}`
+    const response: {
+      repository: { pullRequest: { reviews: { nodes: { author: { login: string } }[] } } }
     } = await this.#client.graphql(query, {
       owner: this.#repoOwner,
-      name: this.#repoName,
-      number: prNumber
+      repoName: this.#repoName,
+      prNumber
     })
 
-    const pr = prResponse.repository.pullRequest
-    console.log(`PR Response from Number: ${prNumber}: `, pr)
+    const userSet = response.repository.pullRequest.reviews.nodes.reduce(
+      (acc, review: { author: { login: string } }) => {
+        acc.add(review.author.login)
+        return acc
+      },
+      new Set<string>()
+    )
+    return [...userSet]
+  }
 
-    return {
-      author: pr.author.login,
-      baseBranch: pr.baseRefName,
-      isDraft: pr.isDraft,
-      isOpen: pr.state.toLowerCase() === 'open',
-      labels: pr.labels.nodes.map((label: { name: string }) => label.name),
-      state: pr.state
-    }
+  async addComment(prNumber: number, message: string): Promise<IssueCreateCommentResponse> {
+    return this.#validateAPIResponse(
+      'Add comment',
+      await this.#client.rest.issues.createComment({
+        owner: this.#repoOwner,
+        repo: this.#repoName,
+        issue_number: prNumber,
+        body: message
+      })
+    )
   }
 
   async updateComment(commentId: number, message: string): Promise<IssueUpdateCommentResponse> {
-    const response = await this.#client.rest.issues.updateComment({
-      owner: this.#repoOwner,
-      repo: this.#repoName,
-      comment_id: commentId,
-      body: message
-    })
-
-    return response.data
+    return this.#validateAPIResponse(
+      'Add comment',
+      await this.#client.rest.issues.updateComment({
+        owner: this.#repoOwner,
+        repo: this.#repoName,
+        comment_id: commentId,
+        body: message
+      })
+    )
   }
 
-  async addComment(message: string, prNumber: number): Promise<IssueCreateCommentResponse> {
-    const response = await this.#client.rest.issues.createComment({
-      owner: this.#repoOwner,
-      repo: this.#repoName,
-      issue_number: prNumber,
-      body: message
-    })
-    return response.data
+  async addLabel(prNumber: number, label: string): Promise<IssueAddLabelResponse> {
+    return this.#validateAPIResponse(
+      'Add Label',
+      await this.#client.rest.issues.addLabels({
+        owner: this.#repoOwner,
+        repo: this.#repoName,
+        issue_number: prNumber,
+        labels: [label]
+      })
+    )
   }
 
-  async addLabel(prNumber: number, label: string): Promise<void> {
-    const existingLabels = JSON.parse(getEnv('PR_LABELS') || '[]').map((labelObj: { name: string }) => labelObj.name)
-    if (existingLabels.includes(label)) {
-      core.debug(`PR already has label ${label}`)
-      return
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async getPRInformation(prNumber: number): Promise<any> {
+    const query = `query GetPRBaseBranchDetails($owner: String!, $repoName: String!, $prNumber: Int!) {
+  repository(owner: $owner, name: $repoName) {
+    defaultBranchRef {
+      name
     }
-
-    // Add the label to the PR
-    await this.#client.rest.issues.addLabels({
+    pullRequest(number: $prNumber) {
+      baseRef {
+        name
+        target {
+          oid
+        }
+        repository {
+          id
+          name
+          url
+          primaryLanguage {
+            name
+          }
+          owner {
+            login
+          }
+        }
+      }
+    }
+  }
+}
+`
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response: any = await this.#client.graphql(query, {
       owner: this.#repoOwner,
-      repo: this.#repoName,
-      issue_number: prNumber,
-      labels: [label]
+      repoName: this.#repoName,
+      prNumber
     })
+
+    return response.repository
   }
 }
 
-export default Github
+export default Client
