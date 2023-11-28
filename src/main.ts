@@ -39,8 +39,13 @@ export async function run(): Promise<void> {
   }
 
   config.baseBranch = event.payload.repository.default_branch
+
+  console.debug(
+    `Event: ${eventName}, Action: ${event.payload.action} on baseBranch=${config.baseBranch}, canProcess=${process}`
+  )
+
   if (process) {
-    const response = await Promise.allSettled([dataDumper(), migrator.processEvent(event)])
+    const response = await Promise.allSettled([migrator.processEvent(event), dataDumper()])
     if (response[0].status === 'rejected') {
       throw response[0].reason
     }

@@ -1,17 +1,21 @@
 import { User } from './types.gha'
 
+export type MigrationResponse = {
+  source: 'atlas'
+  response: string
+}
+
 export interface MigrationRunListResponse {
   migrationAvailable: boolean
-  migratedFileList: string[][]
+  executionResponseList: MigrationResponse[]
   errMsg: string | null
 }
 
 export interface MigrationConfig {
   databaseUrl: string
   dir: string
-  migrationsTable: string
-  direction: 'up'
-  checkOrder: true
+  baseline?: string
+  schema: string
   dryRun: boolean
 }
 
@@ -22,7 +26,8 @@ export interface MatchTeamWithPRApproverResult {
 }
 
 export interface RunMigrationResult {
-  migratedFileList: string[][]
+  executionResponseList: MigrationResponse[]
+  migrationAvailable: boolean
   ignore: boolean
 }
 
@@ -30,6 +35,7 @@ export type MigrationMeta = {
   eventName: string
   actionName: string
   triggeredBy: User
+  skipCommentWhenNoMigrationsAvailable?: boolean
 } & (
   | {
       source: 'comment'

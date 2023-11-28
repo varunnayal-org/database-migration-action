@@ -35,7 +35,8 @@ export interface Config {
 
 export interface DatabaseConfig {
   directory: string
-  migration_table: string
+  schema: string
+  baseline?: string
   envName: string
 }
 
@@ -83,7 +84,7 @@ export default function buildConfig(): Config {
     if (!dbConfig.directory) {
       dbConfig.directory = '.'
     }
-    dbConfig.migration_table = 'migrations'
+    dbConfig.schema = dbConfig.schema || 'public'
     return acc
   }, [])
   console.log(`Loaded Config from ${configFileName} `, config)

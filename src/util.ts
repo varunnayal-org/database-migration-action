@@ -1,5 +1,7 @@
 import * as core from '@actions/core'
+import { spawn } from 'child_process'
 import fs from 'fs'
+import { MigrationResponse } from './types'
 
 export type CommentBuilderHandler = (boldText: string, msg?: string) => string
 
@@ -69,21 +71,60 @@ function buildExecutionMarkdown(htmlURL: string, isJiraEvent: boolean): string {
   return `[Execution|${executionURL}]`
 }
 
-function getFileListingForComment(migrationFileListByDirectory: string[][], dbDirList: string[]): string {
+function getFileListingForComment(migrationFileListByDirectory: MigrationResponse[], dbDirList: string[]): string {
   return migrationFileListByDirectory
-    .reduce((acc, fileList, idx) => {
-      acc.push(`Directory: '${dbDirList[idx]}'`)
-      if (fileList.length === 0) {
-        acc.push('  Files: NA')
+    .reduce<string[]>(
+      (acc, response, idx) => {
+        acc.push(`- Directory: **'${dbDirList[idx]}'**`)
+        if (response.response === '') {
+          acc.push('  Files: NA')
+        } else {
+          acc.push(`\`\`\`\n${response.response}\n\`\`\``)
+        }
         return acc
-      }
-      acc.push('  Files:')
-      for (const file of fileList) {
-        acc.push(`- ${file}`)
-      }
-      return acc
-    }, [])
+      },
+      ['']
+    )
     .join('\r\n')
 }
 
-export { createTempDir, removeDir, cleanDir, getEnv, getInput, commentBuilder, getFileListingForComment }
+async function exec(command: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // Spawn the process
+    const process = spawn(command, args)
+
+    let output = ''
+
+    // Collect data from stdout
+    process.stdout.on('data', data => {
+      output += data.toString()
+    })
+
+    // Collect data from stderr
+    process.stderr.on('data', data => {
+      output += data.toString()
+    })
+
+    // Handle process errors (e.g., command not found)
+    process.on('error', error => {
+      reject(error)
+    })
+
+    // Resolve the promise when the process exits
+    process.on('close', code => {
+      output = output.trim()
+      core.debug(`Command: ${command} ${args.join(' ')}\n\tcode=${code} output=${output}`)
+      if (code === 0) {
+        resolve(output)
+      } else {
+        let errMsg = `Process "${command} ${args.join(' ')}" exited with code ${code}`
+        if (output) {
+          errMsg += `\n${output}`
+        }
+        reject(new Error(errMsg))
+      }
+    })
+  })
+}
+
+export { createTempDir, removeDir, cleanDir, getEnv, getInput, commentBuilder, getFileListingForComment, exec }

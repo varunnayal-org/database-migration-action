@@ -4,11 +4,17 @@
 
 1. Ensure auditable database migrations
 1. Ensure necessary approvals are in place before running the migrations. This is handled using GitHub teams
-1. List files being considered for migrations.
+1. List SQL commands being considered for migrations.
 1. Ignore draft PRs
-1. Trigger works when
-   1. When pull request is either opened, reopened or synchronized
-   1. When pull request is approved
+1. Triggers points:
+   1. When PR is either opened, reopened or synchronized
+   1. When PR is approved
+   1. When a comment is added on PR
+
+## Todo
+
+- [ ] Schedule migrations
+- [ ] Single repository multi deployment
 
 ## Setup
 
@@ -85,12 +91,15 @@
           // Default: "."
           "directory": ".",
 
-          // Table to log migrations
-          // Default: "migrations"
-          "migration_table": "migrations",
-
           // env MY_SVC_DB_URL should be added in AWS secret manager
           "envName": "" // Add Secret Name added in AWS secret
+
+          // pg schema name where migration revision table resides
+          // Default: public
+          "schema": "",
+
+          // A number in YYYYMMDDHHMMSS format. If passed, migrations till this revision will be skipped
+          "baseline": 0,
         }
       ]
     }
