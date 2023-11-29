@@ -54321,6 +54321,7 @@ class Client {
     #validateAPIResponse(errMsg, response) {
         // console.debug(response)
         if (!response) {
+            console.error(response);
             throw new Error(errMsg);
         }
         return response.data;
@@ -54382,40 +54383,32 @@ class Client {
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async getPRInformation(prNumber) {
-        const query = `query GetPRBaseBranchDetails($owner: String!, $repoName: String!, $prNumber: Int!) {
-  repository(owner: $owner, name: $repoName) {
-    defaultBranchRef {
-      name
-    }
-    pullRequest(number: $prNumber) {
-      baseRef {
-        name
-        target {
-          oid
-        }
-        repository {
-          id
-          name
-          url
-          primaryLanguage {
-            name
-          }
-          owner {
-            login
-          }
-        }
-      }
-    }
-  }
-}
-`;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const response = await this.#client.graphql(query, {
+        const pr = this.#validateAPIResponse('Get PR Information', await this.#client.rest.pulls.get({
             owner: this.#repoOwner,
-            repoName: this.#repoName,
-            prNumber
-        });
-        return response.repository;
+            repo: this.#repoName,
+            pull_number: prNumber
+        }));
+        return {
+            defaultBranchRef: {
+                name: pr.base.repo.default_branch
+            },
+            pullRequest: {
+                baseRef: {
+                    name: pr.base.ref,
+                    repository: {
+                        id: pr.base.repo.id,
+                        name: pr.base.repo.name,
+                        url: pr.base.repo.html_url,
+                        primaryLanguage: {
+                            name: pr.base.repo.language
+                        },
+                        owner: {
+                            login: pr.base.repo.owner.login
+                        }
+                    }
+                }
+            }
+        };
     }
 }
 exports["default"] = Client;
@@ -54760,7 +54753,7 @@ class MigrationService {
     #validatePullRequest(pullRequest) {
         const { base } = pullRequest;
         if (base.ref !== this.#config.baseBranch) {
-            return `Base branch should be ${this.#config.baseBranch}`;
+            return `Base branch should be ${this.#config.baseBranch}, found ${base.ref}`;
         }
         else if (pullRequest.state !== 'open') {
             return `PR is in ${pullRequest.state} state`;

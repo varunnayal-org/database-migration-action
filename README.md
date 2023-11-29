@@ -15,6 +15,7 @@
 
 - [ ] Schedule migrations
 - [ ] Single repository multi deployment
+- [ ] Add PR approval comment for teams mentioned in configuration
 
 ## Setup
 

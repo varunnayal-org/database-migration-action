@@ -99,6 +99,7 @@ class Client {
   #validateAPIResponse<T>(errMsg: string, response: OctokitResponse<T>): T {
     // console.debug(response)
     if (!response) {
+      console.error(response)
       throw new Error(errMsg)
     }
     return response.data
@@ -180,41 +181,35 @@ class Client {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getPRInformation(prNumber: number): Promise<any> {
-    const query = `query GetPRBaseBranchDetails($owner: String!, $repoName: String!, $prNumber: Int!) {
-  repository(owner: $owner, name: $repoName) {
-    defaultBranchRef {
-      name
-    }
-    pullRequest(number: $prNumber) {
-      baseRef {
-        name
-        target {
-          oid
-        }
-        repository {
-          id
-          name
-          url
-          primaryLanguage {
-            name
-          }
-          owner {
-            login
+    const pr = this.#validateAPIResponse(
+      'Get PR Information',
+      await this.#client.rest.pulls.get({
+        owner: this.#repoOwner,
+        repo: this.#repoName,
+        pull_number: prNumber
+      })
+    )
+    return {
+      defaultBranchRef: {
+        name: pr.base.repo.default_branch
+      },
+      pullRequest: {
+        baseRef: {
+          name: pr.base.ref,
+          repository: {
+            id: pr.base.repo.id,
+            name: pr.base.repo.name,
+            url: pr.base.repo.html_url,
+            primaryLanguage: {
+              name: pr.base.repo.language
+            },
+            owner: {
+              login: pr.base.repo.owner.login
+            }
           }
         }
       }
     }
-  }
-}
-`
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const response: any = await this.#client.graphql(query, {
-      owner: this.#repoOwner,
-      repoName: this.#repoName,
-      prNumber
-    })
-
-    return response.repository
   }
 }
 

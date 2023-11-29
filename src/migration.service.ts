@@ -27,7 +27,7 @@ export default class MigrationService {
   #validatePullRequest(pullRequest: gha.PullRequest): string | undefined {
     const { base } = pullRequest
     if (base.ref !== this.#config.baseBranch) {
-      return `Base branch should be ${this.#config.baseBranch}`
+      return `Base branch should be ${this.#config.baseBranch}, found ${base.ref}`
     } else if (pullRequest.state !== 'open') {
       return `PR is in ${pullRequest.state} state`
     } else if (pullRequest.draft) {

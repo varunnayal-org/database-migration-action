@@ -7,8 +7,7 @@
     > - DB for the application, say `app-db`
     > - DB for the same application, say `app-db1`. Used to run the initial migration that is generated
     > - Dev DB (this will be empty database) say `dev_db` (Not to be confused with development database)
-
-2. Install [atlas](https://github.com/ariga/atlas)
+1. Install [atlas](https://github.com/ariga/atlas)
 
     ```sh
     curl -sSf https://atlasgo.sh | sh
