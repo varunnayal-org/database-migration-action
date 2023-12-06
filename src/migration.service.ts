@@ -4,7 +4,13 @@ import AWSClient from './client/aws'
 import { Config } from './config'
 import * as gha from './types.gha'
 import { runMigrationFromList, buildMigrationConfigList, getDirectoryForDb } from './migration'
-import { MigrationRunListResponse, MatchTeamWithPRApproverResult, RunMigrationResult, MigrationMeta } from './types'
+import {
+  MigrationRunListResponse,
+  MatchTeamWithPRApproverResult,
+  RunMigrationResult,
+  MigrationMeta,
+  MigrationResponse
+} from './types'
 import { commentBuilder, getFileListingForComment } from './util'
 
 export default class MigrationService {
@@ -21,7 +27,7 @@ export default class MigrationService {
   #validatePullRequest(pullRequest: gha.PullRequest): string | undefined {
     const { base } = pullRequest
     if (base.ref !== this.#config.baseBranch) {
-      return `Base branch should be ${this.#config.baseBranch}`
+      return `Base branch should be ${this.#config.baseBranch}, found ${base.ref}`
     } else if (pullRequest.state !== 'open') {
       return `PR is in ${pullRequest.state} state`
     } else if (pullRequest.draft) {
@@ -29,10 +35,12 @@ export default class MigrationService {
     }
   }
 
-  async #ensureLabel(prNumber: number, labels: gha.Label[], label: string): Promise<void> {
-    const hasLabel = labels.some(labelEntry => labelEntry.name === label)
+  #hasLabel(labels: gha.Label[], label: string): boolean {
+    return labels.some(labelEntry => labelEntry.name === label)
+  }
 
-    if (hasLabel) {
+  async #ensureLabel(prNumber: number, labels: gha.Label[], label: string): Promise<void> {
+    if (this.#hasLabel(labels, label)) {
       return
     }
     await this.#client.addLabel(prNumber, label)
@@ -52,7 +60,7 @@ export default class MigrationService {
       triggeredBy: payload.pull_request.user
     })
 
-    if (result !== null && result.migratedFileList.length > 0) {
+    if (result.migrationAvailable) {
       // We can create JIRA ticket if required
       await this.#ensureLabel(payload.number, payload.pull_request.labels, this.#config.prLabel)
     }
@@ -99,11 +107,11 @@ export default class MigrationService {
   async #addCommentWithFileListing(
     pullRequest: gha.PullRequest,
     msg: string,
-    migratedFileList: string[][],
+    executionResponseList: MigrationResponse[],
     migrationMeta: MigrationMeta
   ): Promise<IssueUpdateCommentResponse | IssueCreateCommentResponse> {
     const fileListForComment = getFileListingForComment(
-      migratedFileList,
+      executionResponseList,
       this.#config.databases.map(db => getDirectoryForDb(this.#config.baseDirectory, db))
     )
 
@@ -158,7 +166,12 @@ export default class MigrationService {
     } else {
       msg = commentBuilderFn('successful')
     }
-    await this.#addCommentWithFileListing(pullRequest, msg, migrationRunListResponse.migratedFileList, migrationMeta)
+    await this.#addCommentWithFileListing(
+      pullRequest,
+      msg,
+      migrationRunListResponse.executionResponseList,
+      migrationMeta
+    )
   }
 
   /**
@@ -227,8 +240,9 @@ export default class MigrationService {
 
     const migrationRunListResponse = await runMigrationFromList(migrationConfigList, false)
 
-    const result = {
-      migratedFileList: migrationRunListResponse.migratedFileList,
+    const result: RunMigrationResult = {
+      executionResponseList: migrationRunListResponse.executionResponseList,
+      migrationAvailable: migrationRunListResponse.migrationAvailable,
       ignore: false
     }
 
@@ -237,7 +251,7 @@ export default class MigrationService {
       await this.#addCommentWithFileListing(
         pullRequest,
         commentBuilderFn('failed', migrationRunListResponse.errMsg),
-        migrationRunListResponse.migratedFileList,
+        migrationRunListResponse.executionResponseList,
         migrationMeta
       )
       core.setFailed(migrationRunListResponse.errMsg)
@@ -247,7 +261,7 @@ export default class MigrationService {
         await this.#addCommentWithFileListing(
           pullRequest,
           commentBuilderFn('failed', 'No migrations available'),
-          migrationRunListResponse.migratedFileList,
+          migrationRunListResponse.executionResponseList,
           migrationMeta
         )
         core.debug('No migrations available')
@@ -269,7 +283,7 @@ export default class MigrationService {
     await this.#addCommentWithFileListing(
       pullRequest,
       commentBuilderFn('successful', successMsg),
-      migrationRunListResponse.migratedFileList,
+      migrationRunListResponse.executionResponseList,
       migrationMeta
     )
 
@@ -293,6 +307,17 @@ export default class MigrationService {
     )
     const migrationRunListResponse = await runMigrationFromList(migrationConfigList, true)
 
+    if (
+      migrationRunListResponse.migrationAvailable === false &&
+      migrationMeta.skipCommentWhenNoMigrationsAvailable === true
+    ) {
+      return {
+        executionResponseList: migrationRunListResponse.executionResponseList,
+        migrationAvailable: migrationRunListResponse.migrationAvailable,
+        ignore: true
+      }
+    }
+
     await this.#handleDryRunResponse(
       pr,
       migrationRunListResponse,
@@ -301,23 +326,10 @@ export default class MigrationService {
     )
 
     return {
-      migratedFileList: migrationRunListResponse.migratedFileList,
+      executionResponseList: migrationRunListResponse.executionResponseList,
+      migrationAvailable: migrationRunListResponse.migrationAvailable,
       ignore: true
     }
-  }
-
-  async #processMigration(
-    pr: gha.PullRequest,
-    dryRun: boolean,
-    migrationMeta: MigrationMeta
-  ): Promise<RunMigrationResult | null> {
-    core.info(`fn:processMigration PR#${pr.number}, Dry Run: ${dryRun}, Source=${migrationMeta.source}`)
-
-    if (dryRun === true) {
-      return await this.#runMigrationForDryRun(pr, migrationMeta)
-    }
-
-    return await this.#runMigrationsForExecution(pr, migrationMeta)
   }
 
   /**
@@ -326,15 +338,24 @@ export default class MigrationService {
    * @returns
    */
   async #processPullRequestReview(event: gha.ContextPullRequestReview): Promise<RunMigrationResult> {
+    if (!this.#hasLabel(event.payload.pull_request.labels, this.#config.prLabel)) {
+      this.#skipProcessingHandler(`${event.eventName}, reason=label missing`, event.payload)
+      return {
+        executionResponseList: [],
+        migrationAvailable: false,
+        ignore: true
+      }
+    }
     const { payload } = event
     const result = await this.#runMigrationForDryRun(payload.pull_request, {
       eventName: event.eventName,
       actionName: payload.action,
+      skipCommentWhenNoMigrationsAvailable: true,
       source: 'review',
       triggeredBy: payload.sender || payload.review.user
     })
 
-    if (result !== null && result.migratedFileList.length > 0) {
+    if (result.migrationAvailable) {
       // We can create JIRA ticket if required
       await this.#ensureLabel(payload.pull_request.number, payload.pull_request.labels, this.#config.prLabel)
     }
@@ -359,15 +380,15 @@ export default class MigrationService {
       result = await this.#runMigrationsForExecution(event.payload.issue, migrationMeta)
     }
 
-    if (result !== null && result.migratedFileList.length > 0) {
+    if (result?.migrationAvailable) {
       // We can create JIRA ticket if required
       await this.#ensureLabel(event.payload.issue.number, event.payload.issue.labels, this.#config.prLabel)
     }
     return result
   }
 
-  #handleInvalidAction(eventName: string, payload: { action: string }): void {
-    core.debug(`Invalid event: event=${eventName} action=${payload.action}`)
+  #skipProcessingHandler(eventName: string, payload: { action: string }): void {
+    core.info(`Invalid event: event=${eventName} action=${payload.action}`)
   }
 
   async processEvent(event: gha.Context): Promise<void> {
@@ -377,27 +398,27 @@ export default class MigrationService {
 
     const errMsg = this.#validatePullRequest('pull_request' in payload ? payload.pull_request : payload.issue)
     if (errMsg) {
-      console.debug(errMsg)
+      console.info(errMsg)
       return
     }
 
     if (eventName === 'pull_request_review') {
       if (payload.action !== 'submitted') {
-        return this.#handleInvalidAction(eventName, payload)
+        return this.#skipProcessingHandler(eventName, payload)
       }
       await this.#processPullRequestReview(event)
     } else if (eventName === 'issue_comment') {
       if (payload.action !== 'created') {
-        return this.#handleInvalidAction(eventName, payload)
+        return this.#skipProcessingHandler(eventName, payload)
       }
       await this.#processPullRequestComment(event)
     } else if (eventName === 'pull_request') {
       if (payload.action !== 'opened' && payload.action !== 'reopened' && payload.action !== 'synchronize') {
-        return this.#handleInvalidAction(eventName, payload)
+        return this.#skipProcessingHandler(eventName, payload)
       }
       await this.#processPullRequest(event)
     } else {
-      return this.#handleInvalidAction(eventName, payload)
+      return this.#skipProcessingHandler(eventName, payload)
     }
   }
 

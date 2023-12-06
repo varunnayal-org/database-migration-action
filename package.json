@@ -73,7 +73,6 @@
     "@octokit/rest": "^20.0.2",
     "axios": "^1.6.2",
     "g": "^2.0.1",
-    "node-pg-migrate": "^6.2.2",
     "pg": "^8.11.3"
   },
   "devDependencies": {

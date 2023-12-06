@@ -13,6 +13,9 @@ inputs:
   migration_config_file:
     description: 'Migration configuration file'
     default: './db.migration.json'
+  atlas_version:
+    description: Atlas version
+    default: v0.15.0
   debug:
     description: 'show debug logs (true|false)'
     default: 'false'
@@ -81,6 +84,25 @@ runs:
     - name: checkout repo for PR Events
       if: (steps.checks.outputs.can_execute == '1' && steps.checks.outputs.pr_comment != '1')
       uses: actions/checkout@v3
+
+    - name: Cache atlas
+      id: cache-atlas
+      uses: actions/cache@v3
+      if: steps.checks.outputs.can_execute == '1'
+      with:
+        path: /usr/local/bin/atlas
+        key: atlas-${{ inputs.atlas_version }}-${{ runner.os }}
+
+    - name: setup atlas
+      shell: bash
+      if: (steps.checks.outputs.can_execute == '1' && steps.cache-atlas.outputs.cache-hit != 'true')
+      run: curl -sSf https://atlasgo.sh | ATLAS_VERSION=${{inputs.atlas_version}} CI=true sh
+
+    - name: setup_node
+      uses: actions/setup-node@v4
+      if: steps.checks.outputs.can_execute == '1'
+      with:
+        node-version: 20
 
     - name: migration approvals
       if: steps.checks.outputs.can_execute == '1'
