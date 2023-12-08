@@ -16,6 +16,51 @@
 - [ ] Schedule migrations
 - [ ] Single repository multi deployment
 - [ ] Add PR approval comment for teams mentioned in configuration
+- [ ] Closed PR?
+- [ ] Schema changes after approval
+
+### Action Items
+
+- [ ] JIRA integration for approval
+- [x] Do not allow drop commands (Mention in Dev SOP). Can we use linters?
+  - Can be handled using `atlas.hcl` file with configuration
+
+    ```hcl
+    lint {
+      destructive {
+        error = true
+      }
+    }
+    ```
+
+- [ ] DBA SOP
+- [ ] Dry run on actual schema replica
+- [ ] How to kill long running migrations
+- [ ] How to capture database drifts
+- [ ] How can DBA run migrations manually instead of commands? Write an SOP for the same. How will be sync migration table?
+- [ ] A separate PR for migrations. Reject/Close PR if it contains business logic files
+- [ ] A PR template for migrations PRs
+- [ ] Questions
+  - [ ] Github action times out waiting for a long running migration to execute
+  - [ ] Does every file change runs withing a transaction block
+  - [ ] [How to use lock_timeout and statement_timeout](https://postgres.ai/blog/20210923-zero-downtime-postgres-schema-migrations-lock-timeout-and-retries)
+- [ ] Handle [out or order](./docs/cases.md#out-or-order) changes
+  - [x] Will be solved in atlas v0.16.x release. Current release is [v0.15.0](https://github.com/ariga/atlas/releases/tag/v0.15.0).
+
+### POC
+
+- Create index
+  - Concurrent indexes cannot be created within a transaction as they are executed outside the context of the transaction so that the do not block read/write ops.
+  - Create index migrations should not be clubbed with any other migrations as we don't want them to run withing a transactional block.
+  - You can have multiple `create index concurrently` commands within a single migration file.
+  - Add following comment as the first line `-- atlas:txmode none`. Example file
+
+    ```sql
+    -- atlas:txmode none
+    -- creating index on my_table
+    create index concurrently idx_my_index on my_table(my_column)
+    create index concurrently idx_my_index_2 on my_table_other(my_column)
+    ```
 
 ## Setup
 
