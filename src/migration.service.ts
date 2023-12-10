@@ -1,9 +1,8 @@
 import * as core from '@actions/core'
 import GHClient, { IssueCreateCommentResponse, IssueUpdateCommentResponse } from './client/github'
-import AWSClient from './client/aws'
 import { Config } from './config'
 import * as gha from './types.gha'
-import { runMigrationFromList, buildMigrationConfigList, getDirectoryForDb } from './migration'
+import { runMigrationFromList, buildMigrationConfigList, getDirectoryForDb } from './migration/migration'
 import {
   MigrationRunListResponse,
   MatchTeamWithPRApproverResult,
@@ -12,16 +11,17 @@ import {
   MigrationResponse
 } from './types'
 import { commentBuilder, getFileListingForComment } from './util'
+import { VaultClient } from './client/vault/types'
 
 export default class MigrationService {
   #client: GHClient
-  #aws: AWSClient
+  secretClient: VaultClient
   #config: Config
 
-  constructor(config: Config, client: GHClient, awsClient: AWSClient) {
+  constructor(config: Config, client: GHClient, secretClient: VaultClient) {
     this.#config = config
     this.#client = client
-    this.#aws = awsClient
+    this.secretClient = secretClient
   }
 
   #validatePullRequest(pullRequest: gha.PullRequest): string | undefined {
@@ -204,7 +204,7 @@ export default class MigrationService {
 
     const [prApprovedByUserList, secretMap] = await Promise.all([
       this.#getRequiredApprovalList(pullRequest.number),
-      this.#aws.getSecrets(this.#config.dbSecretNameList)
+      this.secretClient.getSecrets(this.#config.dbSecretNameList)
     ])
 
     /**
@@ -303,7 +303,7 @@ export default class MigrationService {
     const migrationConfigList = await buildMigrationConfigList(
       this.#config.baseDirectory,
       this.#config.databases,
-      await this.#aws.getSecrets(this.#config.dbSecretNameList)
+      await this.secretClient.getSecrets(this.#config.dbSecretNameList)
     )
     const migrationRunListResponse = await runMigrationFromList(migrationConfigList, true)
 

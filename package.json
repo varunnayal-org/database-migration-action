@@ -1,16 +1,16 @@
 {
-  "name": "typescript-action",
-  "description": "GitHub Actions TypeScript template",
+  "name": "database-migration-action",
+  "description": "GitHub Actions for running DB migration",
   "version": "0.0.0",
   "author": "",
   "private": true,
-  "homepage": "https://github.com/actions/typescript-action",
+  "homepage": "https://github.com/varunnayal-org/database-migration-action",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/actions/typescript-action.git"
+    "url": "git+https://github.com/varunnayal-org/database-migration-action.git"
   },
   "bugs": {
-    "url": "https://github.com/actions/typescript-action/issues"
+    "url": "https://github.com/varunnayal-org/database-migration-action/issues"
   },
   "keywords": [
     "actions",
@@ -76,8 +76,11 @@
     "pg": "^8.11.3"
   },
   "devDependencies": {
+    "@commitlint/cli": "^18.4.3",
+    "@commitlint/config-conventional": "^18.4.3",
     "@octokit/types": "^12.3.0",
     "@types/jest": "^29.5.8",
+    "@types/mock-fs": "^4.13.4",
     "@types/node": "^20.9.0",
     "@typescript-eslint/eslint-plugin": "^6.11.0",
     "@typescript-eslint/parser": "^6.11.0",
@@ -87,9 +90,12 @@
     "eslint-plugin-jest": "^27.6.0",
     "eslint-plugin-jsonc": "^2.10.0",
     "eslint-plugin-prettier": "^5.0.1",
+    "husky": "^8.0.3",
     "jest": "^29.7.0",
+    "jest-mock-fs": "^1.0.2",
     "js-yaml": "^4.1.0",
     "make-coverage-badge": "^1.2.0",
+    "mock-fs": "^5.2.0",
     "prettier": "^3.1.0",
     "prettier-eslint": "^16.1.2",
     "ts-jest": "^29.1.1",

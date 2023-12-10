@@ -211,6 +211,18 @@ class Client {
       }
     }
   }
+
+  async getChangedFiles(prNumber: number): Promise<string[]> {
+    const response = this.#validateAPIResponse(
+      'Get Changed Files',
+      await this.#client.rest.pulls.listFiles({
+        owner: this.#repoOwner,
+        repo: this.#repoName,
+        pull_number: prNumber
+      })
+    )
+    return response.map(file => file.filename)
+  }
 }
 
 export default Client
