@@ -2,12 +2,13 @@ import fs from 'fs/promises'
 import path from 'path'
 import * as core from '@actions/core'
 
-import { createTempDir, cleanDir, exec } from './util'
-import { DatabaseConfig } from './config'
-import { MigrationConfig, MigrationResponse, MigrationRunListResponse } from './types'
-import { SecretMap } from './client/aws'
+import * as util from '../util'
+import { DatabaseConfig } from '../config'
+import { MigrationConfig, MigrationResponse, MigrationRunListResponse } from '../types'
+import { SecretMap } from '../client/vault/types'
+import * as atlas from './atlas'
 
-const TEMP_DIR_FOR_MIGRATION = 'tmp/__migrations__'
+export const TEMP_DIR_FOR_MIGRATION = 'tmp/__migrations__'
 
 function getDirectoryForDb(baseDirectory: string, dbConfig: DatabaseConfig): string {
   return path.join(baseDirectory, dbConfig.directory)
@@ -20,13 +21,13 @@ async function buildMigrationConfigList(
 ): Promise<MigrationConfig[]> {
   const migrationConfigList: MigrationConfig[] = []
 
-  await cleanDir(TEMP_DIR_FOR_MIGRATION)
+  await util.cleanDir(TEMP_DIR_FOR_MIGRATION)
 
   for (const dbConfig of databases) {
     // const sourceDir = path.join(config.baseDirectory, dbConfig.directory)
     const sourceDir = getDirectoryForDb(baseDirectory, dbConfig)
 
-    const tempMigrationSQLDir = await createTempDir(path.join(TEMP_DIR_FOR_MIGRATION, dbConfig.directory))
+    const tempMigrationSQLDir = await util.createTempDir(path.join(TEMP_DIR_FOR_MIGRATION, dbConfig.directory))
 
     await ensureSQLFilesInMigrationDir(sourceDir, tempMigrationSQLDir)
 
@@ -52,37 +53,6 @@ function setDryRun(migrationConfigList: MigrationConfig[], dryRun: boolean): voi
   }
 }
 
-async function runUsingAtlas(migrationConfig: MigrationConfig): Promise<string> {
-  const dirInput = `file://${migrationConfig.dir}`
-
-  // Generate hash required step as migrate apply need hash
-  await exec('atlas', ['migrate', 'hash', '--dir', dirInput])
-
-  const migrateApplyArgs = [
-    'migrate',
-    'apply',
-    '--dir',
-    dirInput,
-    '--url',
-    `${migrationConfig.databaseUrl}`,
-    '--revisions-schema',
-    migrationConfig.schema
-  ]
-
-  if (migrationConfig.dryRun) {
-    migrateApplyArgs.push('--dry-run')
-  }
-  if (migrationConfig.baseline) {
-    migrateApplyArgs.push('--baseline', migrationConfig.baseline.toString())
-  }
-
-  const response = await exec('atlas', migrateApplyArgs)
-  if (response && response.toLowerCase() === 'no migration files to execute') {
-    return ''
-  }
-  return response
-}
-
 async function runMigrationFromList(
   migrationConfigList: MigrationConfig[],
   dryRun: boolean
@@ -93,21 +63,27 @@ async function runMigrationFromList(
   for (const migrationConfig of migrationConfigList) {
     migrationConfig.dryRun = dryRun
     try {
-      const response = await runUsingAtlas(migrationConfig)
+      const response = await atlas.run(migrationConfig)
       if (response) {
         migrationAvailable = true
-        migrationResponseList.push({
-          source: 'atlas',
-          response
-        })
       }
+      migrationResponseList.push({
+        source: 'atlas',
+        response
+      })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (ex: any) {
+      const msg = `Dir=${migrationConfig.dir} ${ex.message}`
       if (errMsg === null) {
-        errMsg = `Dir=${migrationConfig.dir} ${ex.message}`
+        errMsg = msg
       } else {
-        errMsg = `${errMsg}\r\nDir=${migrationConfig.dir} ${ex.message}`
+        errMsg = `${errMsg}\r\n${msg}`
       }
+      migrationResponseList.push({
+        source: 'atlas',
+        response: '',
+        error: ex.message
+      })
       console.log(errMsg, ex.stack)
     }
   }
@@ -137,4 +113,4 @@ async function ensureSQLFilesInMigrationDir(sourceDir: string, destinationDir: s
   }
 }
 
-export { getDirectoryForDb, setDryRun, buildMigrationConfigList, runMigrationFromList, runUsingAtlas }
+export { getDirectoryForDb, setDryRun, buildMigrationConfigList, runMigrationFromList }

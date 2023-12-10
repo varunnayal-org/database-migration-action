@@ -3,6 +3,7 @@ import { User } from './types.gha'
 export type MigrationResponse = {
   source: 'atlas'
   response: string
+  error?: string
 }
 
 export interface MigrationRunListResponse {

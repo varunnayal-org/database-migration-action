@@ -24434,7 +24434,7 @@ exports.evaluateExpression = void 0;
 const types_1 = __nccwpck_require__(75442);
 const callFunction_1 = __nccwpck_require__(66318);
 const evaluateTemplate_1 = __nccwpck_require__(21922);
-const getReferenceValue_1 = __nccwpck_require__(17142);
+const getReferenceValue_1 = __nccwpck_require__(23540);
 const evaluateExpression = (obj, keyName, options) => {
     if (typeof obj === "string") {
         return (0, evaluateTemplate_1.evaluateTemplate)(obj, options);
@@ -24665,7 +24665,7 @@ exports.getEndpointUrl = getEndpointUrl;
 
 /***/ }),
 
-/***/ 17142:
+/***/ 23540:
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -29893,7 +29893,7 @@ var fs = __nccwpck_require__(57147);
 var Stream = (__nccwpck_require__(12781).Stream);
 var mime = __nccwpck_require__(43583);
 var asynckit = __nccwpck_require__(14812);
-var populate = __nccwpck_require__(95155);
+var populate = __nccwpck_require__(17142);
 
 // Public API
 module.exports = FormData;
@@ -30388,7 +30388,7 @@ FormData.prototype.toString = function () {
 
 /***/ }),
 
-/***/ 95155:
+/***/ 17142:
 /***/ ((module) => {
 
 // populates missing values
@@ -54198,48 +54198,60 @@ function wrappy (fn, cb) {
 
 /***/ }),
 
-/***/ 59062:
-/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+/***/ 99371:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
 
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getVaultManager = void 0;
+const core = __importStar(__nccwpck_require__(42186));
 const client_secrets_manager_1 = __nccwpck_require__(39600);
-const util_1 = __nccwpck_require__(92629);
-class Client {
-    #secretManager;
-    #secretStore;
-    constructor(region = process.env.AWS_REGION) {
-        this.#secretManager = new client_secrets_manager_1.SecretsManagerClient({
-            region: region || 'ap-south-1'
-        });
-        this.#secretStore = (0, util_1.getInput)('aws_secret_store');
+const aws_1 = __importDefault(__nccwpck_require__(66283));
+/**
+ * Returns a hydrated vault client ready to use for GitHub Actions.
+ * If an AWS secret store is configured, it creates an AWSClient using the SecretsManagerClient
+ * from the AWS SDK and the specified secret store. Otherwise, it throws an error.
+ *
+ * @returns A vault client.
+ * @throws {Error} If no vault is configured.
+ */
+function getVaultManager() {
+    const secretStore = core.getInput('aws_secret_store', { required: false });
+    if (secretStore) {
+        return new aws_1.default(new client_secrets_manager_1.SecretsManagerClient({
+            region: process.env.AWS_REGION || 'ap-south-1'
+        }), secretStore);
     }
-    /**
-     *
-     * @param {string[]} keyNames
-     * @returns
-     */
-    async getSecrets(keyNames) {
-        const command = new client_secrets_manager_1.GetSecretValueCommand({
-            SecretId: this.#secretStore
-        });
-        console.log(await this.#secretManager.send(command));
-        const secretString = (await this.#secretManager.send(command)).SecretString;
-        if (!secretString) {
-            throw new Error(`Secret doesn't exist for secret ${this.#secretStore}`);
-        }
-        const secretMap = JSON.parse(secretString);
-        if (keyNames == null) {
-            return secretMap;
-        }
-        return keyNames.reduce((acc, key) => {
-            acc[key] = secretMap[key];
-            return acc;
-        }, {});
-    }
+    throw new Error('No vault configured');
 }
-exports["default"] = Client;
+exports.getVaultManager = getVaultManager;
 
 
 /***/ }),
@@ -54410,8 +54422,50 @@ class Client {
             }
         };
     }
+    async getChangedFiles(prNumber) {
+        const response = this.#validateAPIResponse('Get Changed Files', await this.#client.rest.pulls.listFiles({
+            owner: this.#repoOwner,
+            repo: this.#repoName,
+            pull_number: prNumber
+        }));
+        return response.map(file => file.filename);
+    }
 }
 exports["default"] = Client;
+
+
+/***/ }),
+
+/***/ 66283:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const client_secrets_manager_1 = __nccwpck_require__(39600);
+class AWSClient {
+    #secretManager;
+    #secretStore;
+    constructor(secretManager, secretStore) {
+        this.#secretManager = secretManager;
+        this.#secretStore = secretStore;
+    }
+    async getSecrets(keyNames) {
+        const command = new client_secrets_manager_1.GetSecretValueCommand({
+            SecretId: this.#secretStore
+        });
+        const secretString = (await this.#secretManager.send(command)).SecretString;
+        if (!secretString) {
+            throw new Error(`Secret doesn't exist for secret ${this.#secretStore}`);
+        }
+        const secretMap = JSON.parse(secretString);
+        return keyNames.reduce((acc, key) => {
+            acc[key] = secretMap[key];
+            return acc;
+        }, {});
+    }
+}
+exports["default"] = AWSClient;
 
 
 /***/ }),
@@ -54672,15 +54726,15 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = void 0;
 const github = __importStar(__nccwpck_require__(95438));
 const github_1 = __importDefault(__nccwpck_require__(74930));
-const aws_1 = __importDefault(__nccwpck_require__(59062));
 const migration_service_1 = __importDefault(__nccwpck_require__(27996));
 const config_1 = __importDefault(__nccwpck_require__(96373));
 const debug_1 = __nccwpck_require__(41417);
+const factory_1 = __nccwpck_require__(99371);
 async function run() {
     const config = (0, config_1.default)();
     const ghClient = github_1.default.fromEnv();
-    const awsClient = new aws_1.default();
-    const migrator = new migration_service_1.default(config, ghClient, awsClient);
+    const secretClient = (0, factory_1.getVaultManager)();
+    const migrator = new migration_service_1.default(config, ghClient, secretClient);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const event = github.context;
     const { eventName } = event;
@@ -54739,16 +54793,16 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(42186));
-const migration_1 = __nccwpck_require__(83524);
+const migration_1 = __nccwpck_require__(10469);
 const util_1 = __nccwpck_require__(92629);
 class MigrationService {
     #client;
-    #aws;
+    secretClient;
     #config;
-    constructor(config, client, awsClient) {
+    constructor(config, client, secretClient) {
         this.#config = config;
         this.#client = client;
-        this.#aws = awsClient;
+        this.secretClient = secretClient;
     }
     #validatePullRequest(pullRequest) {
         const { base } = pullRequest;
@@ -54886,7 +54940,7 @@ class MigrationService {
         const commentBuilderFn = (0, util_1.commentBuilder)('Migrations', pullRequest.base.repo.html_url, false);
         const [prApprovedByUserList, secretMap] = await Promise.all([
             this.#getRequiredApprovalList(pullRequest.number),
-            this.#aws.getSecrets(this.#config.dbSecretNameList)
+            this.secretClient.getSecrets(this.#config.dbSecretNameList)
         ]);
         /**
          * 1. Get migration file listing
@@ -54953,7 +55007,7 @@ class MigrationService {
     }
     async #runMigrationForDryRun(pr, migrationMeta) {
         core.info(`fn:runMigrationForDryRun PR#${pr.number}, Dry Run: true, Source=${migrationMeta.source}`);
-        const migrationConfigList = await (0, migration_1.buildMigrationConfigList)(this.#config.baseDirectory, this.#config.databases, await this.#aws.getSecrets(this.#config.dbSecretNameList));
+        const migrationConfigList = await (0, migration_1.buildMigrationConfigList)(this.#config.baseDirectory, this.#config.databases, await this.secretClient.getSecrets(this.#config.dbSecretNameList));
         const migrationRunListResponse = await (0, migration_1.runMigrationFromList)(migrationConfigList, true);
         if (migrationRunListResponse.migrationAvailable === false &&
             migrationMeta.skipCommentWhenNoMigrationsAvailable === true) {
@@ -55075,7 +55129,69 @@ exports["default"] = MigrationService;
 
 /***/ }),
 
-/***/ 83524:
+/***/ 77441:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.run = void 0;
+const util = __importStar(__nccwpck_require__(92629));
+async function run(migrationConfig) {
+    const dirInput = `file://${migrationConfig.dir}`;
+    // Generate hash required step as migrate apply need hash
+    await util.exec('atlas', ['migrate', 'hash', '--dir', dirInput]);
+    const migrateApplyArgs = [
+        'migrate',
+        'apply',
+        '--dir',
+        dirInput,
+        '--url',
+        `${migrationConfig.databaseUrl}`,
+        '--revisions-schema',
+        migrationConfig.schema
+    ];
+    if (migrationConfig.dryRun) {
+        migrateApplyArgs.push('--dry-run');
+    }
+    if (migrationConfig.baseline) {
+        migrateApplyArgs.push('--baseline', migrationConfig.baseline.toString());
+    }
+    const response = await util.exec('atlas', migrateApplyArgs);
+    if (response && response.toLowerCase() === 'no migration files to execute') {
+        return '';
+    }
+    return response;
+}
+exports.run = run;
+
+
+/***/ }),
+
+/***/ 10469:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -55107,23 +55223,24 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.runUsingAtlas = exports.runMigrationFromList = exports.buildMigrationConfigList = exports.setDryRun = exports.getDirectoryForDb = void 0;
+exports.runMigrationFromList = exports.buildMigrationConfigList = exports.setDryRun = exports.getDirectoryForDb = exports.TEMP_DIR_FOR_MIGRATION = void 0;
 const promises_1 = __importDefault(__nccwpck_require__(73292));
 const path_1 = __importDefault(__nccwpck_require__(71017));
 const core = __importStar(__nccwpck_require__(42186));
-const util_1 = __nccwpck_require__(92629);
-const TEMP_DIR_FOR_MIGRATION = 'tmp/__migrations__';
+const util = __importStar(__nccwpck_require__(92629));
+const atlas = __importStar(__nccwpck_require__(77441));
+exports.TEMP_DIR_FOR_MIGRATION = 'tmp/__migrations__';
 function getDirectoryForDb(baseDirectory, dbConfig) {
     return path_1.default.join(baseDirectory, dbConfig.directory);
 }
 exports.getDirectoryForDb = getDirectoryForDb;
 async function buildMigrationConfigList(baseDirectory, databases, secrets) {
     const migrationConfigList = [];
-    await (0, util_1.cleanDir)(TEMP_DIR_FOR_MIGRATION);
+    await util.cleanDir(exports.TEMP_DIR_FOR_MIGRATION);
     for (const dbConfig of databases) {
         // const sourceDir = path.join(config.baseDirectory, dbConfig.directory)
         const sourceDir = getDirectoryForDb(baseDirectory, dbConfig);
-        const tempMigrationSQLDir = await (0, util_1.createTempDir)(path_1.default.join(TEMP_DIR_FOR_MIGRATION, dbConfig.directory));
+        const tempMigrationSQLDir = await util.createTempDir(path_1.default.join(exports.TEMP_DIR_FOR_MIGRATION, dbConfig.directory));
         await ensureSQLFilesInMigrationDir(sourceDir, tempMigrationSQLDir);
         if (!secrets[dbConfig.envName]) {
             throw new Error(`Secret ${dbConfig.envName} not found`);
@@ -55145,33 +55262,6 @@ function setDryRun(migrationConfigList, dryRun) {
     }
 }
 exports.setDryRun = setDryRun;
-async function runUsingAtlas(migrationConfig) {
-    const dirInput = `file://${migrationConfig.dir}`;
-    // Generate hash required step as migrate apply need hash
-    await (0, util_1.exec)('atlas', ['migrate', 'hash', '--dir', dirInput]);
-    const migrateApplyArgs = [
-        'migrate',
-        'apply',
-        '--dir',
-        dirInput,
-        '--url',
-        `${migrationConfig.databaseUrl}`,
-        '--revisions-schema',
-        migrationConfig.schema
-    ];
-    if (migrationConfig.dryRun) {
-        migrateApplyArgs.push('--dry-run');
-    }
-    if (migrationConfig.baseline) {
-        migrateApplyArgs.push('--baseline', migrationConfig.baseline.toString());
-    }
-    const response = await (0, util_1.exec)('atlas', migrateApplyArgs);
-    if (response && response.toLowerCase() === 'no migration files to execute') {
-        return '';
-    }
-    return response;
-}
-exports.runUsingAtlas = runUsingAtlas;
 async function runMigrationFromList(migrationConfigList, dryRun) {
     let migrationAvailable = false;
     let errMsg = null;
@@ -55179,23 +55269,29 @@ async function runMigrationFromList(migrationConfigList, dryRun) {
     for (const migrationConfig of migrationConfigList) {
         migrationConfig.dryRun = dryRun;
         try {
-            const response = await runUsingAtlas(migrationConfig);
+            const response = await atlas.run(migrationConfig);
             if (response) {
                 migrationAvailable = true;
-                migrationResponseList.push({
-                    source: 'atlas',
-                    response
-                });
             }
+            migrationResponseList.push({
+                source: 'atlas',
+                response
+            });
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         }
         catch (ex) {
+            const msg = `Dir=${migrationConfig.dir} ${ex.message}`;
             if (errMsg === null) {
-                errMsg = `Dir=${migrationConfig.dir} ${ex.message}`;
+                errMsg = msg;
             }
             else {
-                errMsg = `${errMsg}\r\nDir=${migrationConfig.dir} ${ex.message}`;
+                errMsg = `${errMsg}\r\n${msg}`;
             }
+            migrationResponseList.push({
+                source: 'atlas',
+                response: '',
+                error: ex.message
+            });
             console.log(errMsg, ex.stack);
         }
     }

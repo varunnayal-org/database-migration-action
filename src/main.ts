@@ -1,16 +1,16 @@
 import * as github from '@actions/github'
 import GHClient from './client/github'
-import AWSClient from './client/aws'
 import MigrationService from './migration.service'
 import buildConfig from './config'
 import { dataDumper } from './debug'
 import * as gha from './types.gha'
+import { getVaultManager } from './client/factory'
 
 export async function run(): Promise<void> {
   const config = buildConfig()
   const ghClient = GHClient.fromEnv()
-  const awsClient = new AWSClient()
-  const migrator = new MigrationService(config, ghClient, awsClient)
+  const secretClient = getVaultManager()
+  const migrator = new MigrationService(config, ghClient, secretClient)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const event = github.context as any as gha.Context
