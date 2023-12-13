@@ -7,6 +7,7 @@ import * as migration from '../../src/migration/migration'
 import { MigrationConfig, MigrationRunListResponse } from '../../src/types'
 import { SecretMap } from '../../src/client/vault/types'
 import { DatabaseConfig } from '../../src/config'
+import { AtlasMigrationExecutionResponse, VersionExecution } from '../../src/migration/atlas-class'
 
 let atlasRun: jest.SpyInstance
 
@@ -34,6 +35,30 @@ const getMockDirectories = (): Record<string, any> => ({
   }
 })
 
+function getBaseExecutionList(): VersionExecution[] {
+  return [
+    {
+      Name: '20231129060014_add_user.sql',
+      Version: '20231129060014',
+      Description: 'add_user',
+      Start: '2023-12-11T10:55:19.468908+05:30',
+      End: '2023-12-11T10:55:19.470647+05:30',
+      Applied: [
+        'CREATE TABLE users (id uuid NOT NULL, PRIMARY KEY ("id"));',
+        'ALTER TABLE "users" ADD COLUMN "phone" varchar(13);'
+      ]
+    },
+    {
+      Name: '20231206212844_add_column.sql',
+      Version: '20231206212844',
+      Description: 'add_column',
+      Start: '2023-12-11T10:55:19.470647+05:30',
+      End: '2023-12-11T10:55:19.470648+05:30',
+      Applied: ['ALTER TABLE "users" ADD COLUMN "email" varchar(255);']
+    }
+  ]
+}
+
 const getDB = (directory = '.', envName = 'test', schema = 'public'): DatabaseConfig => ({
   directory,
   envName,
@@ -50,6 +75,14 @@ const getExpectedMigrationConfigList = (dir = '.', databaseUrl = 'test', schema 
     dryRun: true
   }
 ]
+
+class MyError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = this.constructor.name
+    this.stack = ''
+  }
+}
 
 describe('buildMigrationConfigList', () => {
   beforeEach(() => {
@@ -155,7 +188,36 @@ describe('buildMigrationConfigList', () => {
 })
 
 describe('runMigrationFromList', () => {
-  const atlasSuccessfulRunResponse = 'atlas migrate apply response'
+  const getAtlasSuccessfulRunResponseString = (): string => JSON.stringify(getBaseExecutionList())
+  const getAtlasSuccessfulRunResponse = (): AtlasMigrationExecutionResponse =>
+    AtlasMigrationExecutionResponse.fromResponse(getAtlasSuccessfulRunResponseString())
+  const getAtlasRunResponseForNull = AtlasMigrationExecutionResponse.fromResponse('null')
+  const getAtlasRunResponseForEmptyString = AtlasMigrationExecutionResponse.fromResponse('')
+
+  function getBaseExecutionListForDB2(): VersionExecution[] {
+    return [
+      {
+        Name: '20231221010101_add_session.sql',
+        Version: '20231221010101',
+        Description: 'add_session',
+        Start: '2023-12-11T10:55:19.468908+05:30',
+        End: '2023-12-11T10:55:19.470647+05:30',
+        Applied: [
+          'CREATE TABLE session (id uuid NOT NULL, PRIMARY KEY ("id"));',
+          'ALTER TABLE "session" ADD COLUMN "phone" varchar(13);'
+        ]
+      },
+      {
+        Name: '20231207000000_add_column.sql',
+        Version: '20231207000000',
+        Description: 'add_column',
+        Start: '2023-12-11T10:55:19.470647+05:30',
+        End: '2023-12-11T10:55:19.470648+05:30',
+        Applied: ['ALTER TABLE "session" ADD COLUMN "email" varchar(255);']
+      }
+    ]
+  }
+
   beforeEach(() => {
     jest.clearAllMocks()
     atlasRun = jest.spyOn(atlas, 'run').mockImplementation()
@@ -164,21 +226,15 @@ describe('runMigrationFromList', () => {
   describe('single_database', () => {
     it('should return no migration available', async () => {
       const migrationConfigList = getExpectedMigrationConfigList()
-      const atlasRunFn = atlasRun.mockResolvedValue('')
+      const atlasRunFn = atlasRun.mockResolvedValue(getAtlasRunResponseForEmptyString)
 
       const response = await migration.runMigrationFromList(migrationConfigList, true)
 
-      // check buildAtlasMockImplementation
       const expectedResponse: MigrationRunListResponse = {
         migrationAvailable: false,
-        executionResponseList: [
-          {
-            source: 'atlas',
-            response: ''
-          }
-        ],
-        errMsg: null
+        executionResponseList: [getAtlasRunResponseForNull]
       }
+
       expect(response).toEqual(expectedResponse)
 
       expect(atlasRunFn).toHaveBeenCalledTimes(1)
@@ -191,20 +247,13 @@ describe('runMigrationFromList', () => {
     it('should return response', async () => {
       const migrationConfigList = getExpectedMigrationConfigList()
 
-      const atlasRunFn = atlasRun.mockResolvedValue(atlasSuccessfulRunResponse)
+      const atlasRunFn = atlasRun.mockResolvedValue(getAtlasSuccessfulRunResponse())
 
       const response = await migration.runMigrationFromList(migrationConfigList, true)
 
-      // check buildAtlasMockImplementation
       const expectedResponse: MigrationRunListResponse = {
         migrationAvailable: true,
-        executionResponseList: [
-          {
-            source: 'atlas',
-            response: atlasSuccessfulRunResponse
-          }
-        ],
-        errMsg: null
+        executionResponseList: [getAtlasSuccessfulRunResponse()]
       }
       expect(response).toEqual(expectedResponse)
 
@@ -231,19 +280,14 @@ describe('runMigrationFromList', () => {
     })
 
     it('should return no migration available', async () => {
-      const atlasRunFn = atlasRun.mockResolvedValue('')
+      const atlasRunFn = atlasRun.mockResolvedValue(getAtlasRunResponseForEmptyString)
       const dryRun = false
 
       const response = await migration.runMigrationFromList(migrationConfigList, dryRun)
 
-      // check buildAtlasMockImplementation
       const expectedResponse: MigrationRunListResponse = {
         migrationAvailable: false,
-        executionResponseList: [
-          { source: 'atlas', response: '' },
-          { source: 'atlas', response: '' }
-        ],
-        errMsg: null
+        executionResponseList: [getAtlasRunResponseForNull, getAtlasRunResponseForEmptyString]
       }
       expect(response).toEqual(expectedResponse)
 
@@ -260,21 +304,23 @@ describe('runMigrationFromList', () => {
 
     it('should return response', async () => {
       const dryRun = true
-      const atlasRunFn = atlasRun.mockResolvedValue(atlasSuccessfulRunResponse)
-      atlasRun.mockImplementation(async (migrationConfig: MigrationConfig) => {
-        return migrationConfig.databaseUrl
+      let calledNum = 0
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const atlasRunFn = atlasRun.mockImplementation(async (migrationConfig: MigrationConfig) => {
+        if (calledNum++ === 0) {
+          return getAtlasSuccessfulRunResponse()
+        }
+        return AtlasMigrationExecutionResponse.fromResponse(JSON.stringify(getBaseExecutionListForDB2()))
       })
 
       const response = await migration.runMigrationFromList(migrationConfigList, dryRun)
 
-      // check buildAtlasMockImplementation
       const expectedResponse: MigrationRunListResponse = {
         migrationAvailable: true,
         executionResponseList: [
-          { source: 'atlas', response: migrationConfigList[0].databaseUrl },
-          { source: 'atlas', response: migrationConfigList[1].databaseUrl }
-        ],
-        errMsg: null
+          getAtlasSuccessfulRunResponse(),
+          AtlasMigrationExecutionResponse.fromResponse(JSON.stringify(getBaseExecutionListForDB2()))
+        ]
       }
       expect(response).toEqual(expectedResponse)
 
@@ -296,27 +342,16 @@ describe('runMigrationFromList', () => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const atlasRunFn = atlasRun.mockImplementation(async (_: MigrationConfig) => {
         if (++atlasRunFnCallCount % 2 === 1) {
-          return '' // no migration available
+          return getAtlasRunResponseForEmptyString // no migration available
         }
-        return atlasSuccessfulRunResponse
+        return getAtlasSuccessfulRunResponse()
       })
 
       const response = await migration.runMigrationFromList(migrationConfigList, dryRun)
 
-      // check buildAtlasMockImplementation
       const expectedResponse: MigrationRunListResponse = {
         migrationAvailable: true,
-        executionResponseList: [
-          {
-            source: 'atlas',
-            response: ''
-          },
-          {
-            source: 'atlas',
-            response: atlasSuccessfulRunResponse
-          }
-        ],
-        errMsg: null
+        executionResponseList: [getAtlasRunResponseForEmptyString, getAtlasSuccessfulRunResponse()]
       }
       expect(response).toEqual(expectedResponse)
 
@@ -337,30 +372,18 @@ describe('runMigrationFromList', () => {
 
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const atlasRunFn = atlasRun.mockImplementation(async (_: MigrationConfig) => {
-        return Promise.reject(new Error(`Atlas error for idx=${atlasRunFnCallCount++}`))
+        return Promise.reject(new MyError(`Atlas error for idx=${atlasRunFnCallCount++}`))
       })
 
       const response = await migration.runMigrationFromList(migrationConfigList, dryRun)
 
-      // check buildAtlasMockImplementation
       const expectedResponse: MigrationRunListResponse = {
         migrationAvailable: false,
         executionResponseList: [
-          {
-            source: 'atlas',
-            response: '',
-            error: `Atlas error for idx=0`
-          },
-          {
-            source: 'atlas',
-            response: '',
-            error: `Atlas error for idx=1`
-          }
+          AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=0`),
+          AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=1`)
         ],
-        errMsg: [
-          `Dir=${expectedMigrationConfigList[0].dir} Atlas error for idx=0`,
-          `Dir=${expectedMigrationConfigList[1].dir} Atlas error for idx=1`
-        ].join('\r\n')
+        errMsg: 'Atlas error for idx=0'
       }
 
       expect(response).toEqual(expectedResponse)
@@ -383,28 +406,20 @@ describe('runMigrationFromList', () => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const atlasRunFn = atlasRun.mockImplementation(async (_: MigrationConfig) => {
         if (++atlasRunFnCallCount % 2 === 1) {
-          return Promise.reject(new Error(`Atlas error for idx=${atlasRunFnCallCount - 1}`))
+          return Promise.reject(new MyError(`Atlas error for idx=${atlasRunFnCallCount - 1}`))
         }
-        return atlasSuccessfulRunResponse
+        return getAtlasSuccessfulRunResponse()
       })
 
       const response = await migration.runMigrationFromList(migrationConfigList, dryRun)
 
-      // check buildAtlasMockImplementation
       const expectedResponse: MigrationRunListResponse = {
         migrationAvailable: true,
         executionResponseList: [
-          {
-            source: 'atlas',
-            response: '',
-            error: `Atlas error for idx=0`
-          },
-          {
-            source: 'atlas',
-            response: atlasSuccessfulRunResponse
-          }
+          AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=0`),
+          getAtlasSuccessfulRunResponse()
         ],
-        errMsg: [`Dir=${expectedMigrationConfigList[0].dir} Atlas error for idx=0`].join('\r\n')
+        errMsg: 'Atlas error for idx=0'
       }
 
       expect(response).toEqual(expectedResponse)

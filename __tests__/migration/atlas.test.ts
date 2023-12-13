@@ -4,6 +4,7 @@ import * as util from '../../src/util'
 import * as migration from '../../src/migration/migration'
 import * as atlas from '../../src/migration/atlas'
 import { MigrationConfig } from '../../src/types'
+import { VersionExecution } from '../../src/migration/atlas-class'
 
 let utilExec: jest.SpyInstance
 
@@ -14,13 +15,28 @@ const getExpectedMigrationConfigList = (dir = '.', dbUrlKey = 'test', schema = '
   baseline: '',
   dryRun: true
 })
-
-const buildAtlasMockImplementation = (
-  fn?: (callNumber: number, command: string, args: string[]) => string
-): jest.SpyInstance => {
-  const handler = fn || ((callNumber, command, args) => `(call=#${callNumber}) ${command} ${args[0]} ${args[1]}`)
-  let callNumber = 0
-  return utilExec.mockImplementation(async (command, args) => handler(++callNumber, command, args))
+function getBaseExecutionList(): VersionExecution[] {
+  return [
+    {
+      Name: '20231129060014_add_user.sql',
+      Version: '20231129060014',
+      Description: 'add_user',
+      Start: '2023-12-11T10:55:19.468908+05:30',
+      End: '2023-12-11T10:55:19.470647+05:30',
+      Applied: [
+        'CREATE TABLE users (id uuid NOT NULL, PRIMARY KEY ("id"));',
+        'ALTER TABLE "users" ADD COLUMN "phone" varchar(13);'
+      ]
+    },
+    {
+      Name: '20231206212844_add_column.sql',
+      Version: '20231206212844',
+      Description: 'add_column',
+      Start: '2023-12-11T10:55:19.470647+05:30',
+      End: '2023-12-11T10:55:19.470648+05:30',
+      Applied: ['ALTER TABLE "users" ADD COLUMN "email" varchar(255);']
+    }
+  ]
 }
 
 describe('runUsingAtlas', () => {
@@ -29,51 +45,13 @@ describe('runUsingAtlas', () => {
     utilExec = jest.spyOn(util, 'exec').mockImplementation()
   })
 
-  it('should return empty string if no migration files to execute', async () => {
-    const migrationConfig = getExpectedMigrationConfigList()
-    const utilExecFn = buildAtlasMockImplementation((callNumber, command, args) => {
-      if (callNumber % 2 === 1) {
-        return `(call=#${callNumber}) ${command} ${args[0]} ${args[1]}`
-      }
-      return 'No migration FilEs tO execute'
-    })
-
-    const response = await atlas.run(migrationConfig)
-
-    // check buildAtlasMockImplementation
-    const expectedResponse = ''
-    expect(response).toEqual(expectedResponse)
-
-    expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
-      'migrate',
-      'hash',
-      '--dir',
-      `file://${migrationConfig.dir}`
-    ])
-    expect(utilExecFn).toHaveBeenNthCalledWith(2, 'atlas', [
-      'migrate',
-      'apply',
-      '--dir',
-      `file://${migrationConfig.dir}`,
-      '--url',
-      `${migrationConfig.databaseUrl}`,
-      '--revisions-schema',
-      migrationConfig.schema,
-      '--dry-run'
-    ])
-  })
-
   it('should return response', async () => {
     const baseline = '00000000000000_baseline.sql'
     const migrationConfig = getExpectedMigrationConfigList()
     migrationConfig.baseline = baseline
-    const utilExecFn = buildAtlasMockImplementation()
+    const utilExecFn = utilExec.mockImplementationOnce(() => JSON.stringify(getBaseExecutionList()))
 
-    const response = await atlas.run(migrationConfig)
-
-    // check buildAtlasMockImplementation
-    const expectedResponse = `(call=#2) atlas migrate apply`
-    expect(response).toEqual(expectedResponse)
+    await atlas.run(migrationConfig)
 
     expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
       'migrate',
@@ -88,6 +66,8 @@ describe('runUsingAtlas', () => {
       `file://${migrationConfig.dir}`,
       '--url',
       `${migrationConfig.databaseUrl}`,
+      '--format',
+      '"{{ json .Applied }}"',
       '--revisions-schema',
       migrationConfig.schema,
       '--dry-run',
@@ -99,13 +79,9 @@ describe('runUsingAtlas', () => {
   it('should return response for execution dryRun=false', async () => {
     const migrationConfig = getExpectedMigrationConfigList()
     migrationConfig.dryRun = false
-    const utilExecFn = buildAtlasMockImplementation()
+    const utilExecFn = utilExec.mockImplementationOnce(() => JSON.stringify(getBaseExecutionList()))
 
-    const response = await atlas.run(migrationConfig)
-
-    // check buildAtlasMockImplementation
-    const expectedResponse = `(call=#2) atlas migrate apply`
-    expect(response).toEqual(expectedResponse)
+    await atlas.run(migrationConfig)
 
     expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
       'migrate',
@@ -120,6 +96,8 @@ describe('runUsingAtlas', () => {
       `file://${migrationConfig.dir}`,
       '--url',
       `${migrationConfig.databaseUrl}`,
+      '--format',
+      '"{{ json .Applied }}"',
       '--revisions-schema',
       migrationConfig.schema
     ])

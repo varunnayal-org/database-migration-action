@@ -43,7 +43,7 @@ export interface DatabaseConfig {
 export default function buildConfig(): Config {
   const configFileName = getInput('migration_config_file', './db.migration.json')
   // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires, import/no-dynamic-require
-  const config: Config = require(path.join(process.cwd(), configFileName))
+  const config: Config = require(path.join(process.env.LOCAL_TESTING_REPO_DIR || process.cwd(), configFileName))
 
   if (!Array.isArray(config.databases) || config.databases.length === 0) {
     console.log(config)

@@ -1,7 +1,7 @@
 # Cases
 
 - [Cases](#cases)
-  - [Out or order](#out-or-order)
+  - [Out of order](#out-of-order)
   - [Database is not clean](#database-is-not-clean)
     - [migrate lint](#migrate-lint)
     - [migrate apply](#migrate-apply)
@@ -20,7 +20,7 @@
     - [Post killing migration statement](#post-killing-migration-statement)
   - [Issues](#issues)
 
-## Out or order
+## Out of order
 
 Consider dev1 creates a migration file with revision T1 and another dev(dev2) created T2. T2 ends up publishing their changes first(PR flow). Later, when dev1 decides to take T1 like, migration won't apply as T2 has been captured as the latest migration. Handling [non-linear](https://atlasgo.io/lint/analyzers#non-linear-changes) execution order is not recommended.
 

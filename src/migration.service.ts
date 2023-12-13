@@ -3,15 +3,9 @@ import GHClient, { IssueCreateCommentResponse, IssueUpdateCommentResponse } from
 import { Config } from './config'
 import * as gha from './types.gha'
 import { runMigrationFromList, buildMigrationConfigList, getDirectoryForDb } from './migration/migration'
-import {
-  MigrationRunListResponse,
-  MatchTeamWithPRApproverResult,
-  RunMigrationResult,
-  MigrationMeta,
-  MigrationResponse
-} from './types'
-import { commentBuilder, getFileListingForComment } from './util'
+import { MigrationRunListResponse, MatchTeamWithPRApproverResult, RunMigrationResult, MigrationMeta } from './types'
 import { VaultClient } from './client/vault/types'
+import { CommentBuilder } from './formatting/comment-builder'
 
 export default class MigrationService {
   #client: GHClient
@@ -104,74 +98,46 @@ export default class MigrationService {
     return result
   }
 
-  async #addCommentWithFileListing(
+  async #setupComment(
+    isJiraEvent: boolean,
+    dryRun: boolean,
     pullRequest: gha.PullRequest,
-    msg: string,
-    executionResponseList: MigrationResponse[],
-    migrationMeta: MigrationMeta
+    migrationMeta: MigrationMeta,
+    migrationRunListResponse: MigrationRunListResponse
   ): Promise<IssueUpdateCommentResponse | IssueCreateCommentResponse> {
-    const fileListForComment = getFileListingForComment(
-      executionResponseList,
+    const builder = new CommentBuilder(
+      dryRun,
+      pullRequest.base.repo.html_url,
       this.#config.databases.map(db => getDirectoryForDb(this.#config.baseDirectory, db))
     )
 
-    let commentId: number | undefined
-    let commentBody: string | undefined
+    let commentMsg = builder.build(isJiraEvent, migrationRunListResponse)
 
-    if ('commentId' in migrationMeta) {
-      commentId = migrationMeta.commentId
-      commentBody = migrationMeta.commentBody
-    }
-
-    let commentHandler: (
-      commentIdOrPrNumber: number,
-      commentMsgToWrite: string
-    ) => Promise<IssueUpdateCommentResponse | IssueCreateCommentResponse>
-    let id = 0
-
-    let commentMsg = `${msg}\r\n${fileListForComment}`
+    // Write summary for gh action
     core.summary.addRaw(commentMsg)
-    if (commentBody && commentId) {
-      commentHandler = this.#client.updateComment.bind(this.#client)
-      id = commentId
-      commentMsg = `${commentBody}\r\n\r\n${commentMsg}`
-      core.debug(`Updating comment=${commentId}\nMsg=${commentMsg}`)
+
+    let ghCommentPromise: Promise<IssueUpdateCommentResponse | IssueCreateCommentResponse>
+    if ('commentId' in migrationMeta) {
+      commentMsg = `${migrationMeta.commentBody}\r\n\r\n${commentMsg}`
+      ghCommentPromise = this.#client.updateComment(migrationMeta.commentId, commentMsg)
+      core.debug(`Updating comment=${migrationMeta.commentId}\nMsg=${commentMsg}`)
     } else {
-      commentHandler = this.#client.addComment.bind(this.#client)
-      id = pullRequest.number
-      commentMsg = `Executed By: @${migrationMeta.triggeredBy.login}\r\nReason=${migrationMeta.eventName}.${migrationMeta.actionName}\r\n${commentMsg}`
+      commentMsg = `Executed By: ${builder
+        .getFormatter(isJiraEvent)
+        .userRef(migrationMeta.triggeredBy.login)}\r\nReason=${migrationMeta.eventName}.${
+        migrationMeta.actionName
+      }\r\n${commentMsg}`
+      ghCommentPromise = this.#client.addComment(pullRequest.number, commentMsg)
       core.debug(`Adding comment ${commentMsg}`)
     }
 
-    const response = await Promise.allSettled([core.summary.write(), commentHandler(id, commentMsg)])
+    const response = await Promise.allSettled([core.summary.write(), ghCommentPromise])
 
     if (response[1].status === 'rejected') {
       throw response[1].reason
     }
 
     return response[1].value
-  }
-
-  async #handleDryRunResponse(
-    pullRequest: gha.PullRequest,
-    migrationRunListResponse: MigrationRunListResponse,
-    commentBuilderFn: (boldText: string, msg?: string) => string,
-    migrationMeta: MigrationMeta
-  ): Promise<void> {
-    let msg = ''
-    if (migrationRunListResponse.errMsg !== null) {
-      msg = commentBuilderFn('failed', migrationRunListResponse.errMsg)
-    } else if (migrationRunListResponse.migrationAvailable === false) {
-      msg = commentBuilderFn('failed', 'No migrations available')
-    } else {
-      msg = commentBuilderFn('successful')
-    }
-    await this.#addCommentWithFileListing(
-      pullRequest,
-      msg,
-      migrationRunListResponse.executionResponseList,
-      migrationMeta
-    )
   }
 
   /**
@@ -200,8 +166,6 @@ export default class MigrationService {
     migrationMeta: MigrationMeta
   ): Promise<RunMigrationResult | null> {
     core.info(`fn:runMigrationsForExecution PR#${pullRequest.number}, Dry Run: true, Source=${migrationMeta.source}`)
-    const commentBuilderFn = commentBuilder('Migrations', pullRequest.base.repo.html_url, false)
-
     const [prApprovedByUserList, secretMap] = await Promise.all([
       this.#getRequiredApprovalList(pullRequest.number),
       this.secretClient.getSecrets(this.#config.dbSecretNameList)
@@ -232,9 +196,10 @@ export default class MigrationService {
       failureMsg = 'User is not part of any owner team'
     }
 
+    const setupCommentFn = this.#setupComment.bind(this, false, false, pullRequest, migrationMeta)
     if (failureMsg) {
       core.setFailed(failureMsg)
-      await this.#addCommentWithFileListing(pullRequest, commentBuilderFn('failed', failureMsg), [], migrationMeta)
+      await setupCommentFn({ executionResponseList: [], migrationAvailable: false, errMsg: failureMsg })
       return null
     }
 
@@ -246,24 +211,15 @@ export default class MigrationService {
       ignore: false
     }
 
-    if (migrationRunListResponse.errMsg !== null) {
+    if (migrationRunListResponse.errMsg) {
       result.ignore = true
-      await this.#addCommentWithFileListing(
-        pullRequest,
-        commentBuilderFn('failed', migrationRunListResponse.errMsg),
-        migrationRunListResponse.executionResponseList,
-        migrationMeta
-      )
+      await setupCommentFn(migrationRunListResponse)
       core.setFailed(migrationRunListResponse.errMsg)
     } else if (migrationRunListResponse.migrationAvailable === false) {
       result.ignore = true
+      migrationRunListResponse.errMsg = 'No migrations available'
       if (pullRequest.labels.some(label => label.name === this.#config.prLabel)) {
-        await this.#addCommentWithFileListing(
-          pullRequest,
-          commentBuilderFn('failed', 'No migrations available'),
-          migrationRunListResponse.executionResponseList,
-          migrationMeta
-        )
+        await setupCommentFn(migrationRunListResponse)
         core.debug('No migrations available')
       }
     }
@@ -280,12 +236,7 @@ export default class MigrationService {
 
     console.log('Ran Successfully: ', successMsg)
 
-    await this.#addCommentWithFileListing(
-      pullRequest,
-      commentBuilderFn('successful', successMsg),
-      migrationRunListResponse.executionResponseList,
-      migrationMeta
-    )
+    await setupCommentFn(migrationRunListResponse)
 
     return result
   }
@@ -308,6 +259,7 @@ export default class MigrationService {
     const migrationRunListResponse = await runMigrationFromList(migrationConfigList, true)
 
     if (
+      !migrationRunListResponse.errMsg &&
       migrationRunListResponse.migrationAvailable === false &&
       migrationMeta.skipCommentWhenNoMigrationsAvailable === true
     ) {
@@ -318,12 +270,7 @@ export default class MigrationService {
       }
     }
 
-    await this.#handleDryRunResponse(
-      pr,
-      migrationRunListResponse,
-      commentBuilder('[DryRun] Migrations', pr.base.repo.html_url, false),
-      migrationMeta
-    )
+    await this.#setupComment(false, true, pr, migrationMeta, migrationRunListResponse)
 
     return {
       executionResponseList: migrationRunListResponse.executionResponseList,
@@ -339,7 +286,7 @@ export default class MigrationService {
    */
   async #processPullRequestReview(event: gha.ContextPullRequestReview): Promise<RunMigrationResult> {
     if (!this.#hasLabel(event.payload.pull_request.labels, this.#config.prLabel)) {
-      this.#skipProcessingHandler(`${event.eventName}, reason=label missing`, event.payload)
+      this.skipProcessingHandler(`${event.eventName}, reason=label missing`, event.payload)
       return {
         executionResponseList: [],
         migrationAvailable: false,
@@ -387,7 +334,7 @@ export default class MigrationService {
     return result
   }
 
-  #skipProcessingHandler(eventName: string, payload: { action: string }): void {
+  skipProcessingHandler(eventName: string, payload: { action: string }): void {
     core.info(`Invalid event: event=${eventName} action=${payload.action}`)
   }
 
@@ -404,21 +351,21 @@ export default class MigrationService {
 
     if (eventName === 'pull_request_review') {
       if (payload.action !== 'submitted') {
-        return this.#skipProcessingHandler(eventName, payload)
+        return this.skipProcessingHandler(eventName, payload)
       }
       await this.#processPullRequestReview(event)
     } else if (eventName === 'issue_comment') {
       if (payload.action !== 'created') {
-        return this.#skipProcessingHandler(eventName, payload)
+        return this.skipProcessingHandler(eventName, payload)
       }
       await this.#processPullRequestComment(event)
     } else if (eventName === 'pull_request') {
       if (payload.action !== 'opened' && payload.action !== 'reopened' && payload.action !== 'synchronize') {
-        return this.#skipProcessingHandler(eventName, payload)
+        return this.skipProcessingHandler(eventName, payload)
       }
       await this.#processPullRequest(event)
     } else {
-      return this.#skipProcessingHandler(eventName, payload)
+      return this.skipProcessingHandler(eventName, payload)
     }
   }
 

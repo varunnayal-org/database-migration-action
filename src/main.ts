@@ -2,7 +2,7 @@ import * as github from '@actions/github'
 import GHClient from './client/github'
 import MigrationService from './migration.service'
 import buildConfig from './config'
-import { dataDumper } from './debug'
+import { dataDumper } from './echo_state'
 import * as gha from './types.gha'
 import { getVaultManager } from './client/factory'
 
@@ -49,5 +49,7 @@ export async function run(): Promise<void> {
     if (response[0].status === 'rejected') {
       throw response[0].reason
     }
+  } else {
+    migrator.skipProcessingHandler(eventName, event.payload || {})
   }
 }

@@ -54484,7 +54484,7 @@ const util_1 = __nccwpck_require__(92629);
 function buildConfig() {
     const configFileName = (0, util_1.getInput)('migration_config_file', './db.migration.json');
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires, import/no-dynamic-require
-    const config = require(path_1.default.join(process.cwd(), configFileName));
+    const config = require(path_1.default.join(process.env.LOCAL_TESTING_REPO_DIR || process.cwd(), configFileName));
     if (!Array.isArray(config.databases) || config.databases.length === 0) {
         console.log(config);
         throw new Error('No databases configured');
@@ -54529,7 +54529,7 @@ exports["default"] = buildConfig;
 
 /***/ }),
 
-/***/ 41417:
+/***/ 44902:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -54639,6 +54639,169 @@ exports.dataDumper = dataDumper;
 
 /***/ }),
 
+/***/ 13039:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.CommentBuilder = void 0;
+const util_1 = __nccwpck_require__(92629);
+const formatters_1 = __nccwpck_require__(91066);
+class CommentBuilder {
+    dryRun;
+    repoBaseURL;
+    dbDirList;
+    constructor(dryRun, repoBaseURL, dbDirList) {
+        this.dryRun = dryRun;
+        this.repoBaseURL = repoBaseURL;
+        this.dbDirList = dbDirList;
+    }
+    #buildTableAndSQLStatement(fmt, response) {
+        let sqlStatementString = '';
+        const tableStr = response.executionResponseList.reduce((acc, executionResponseList, idx) => {
+            sqlStatementString += `-- DIRECTORY: ${this.dbDirList[idx]}`;
+            const migrationDirMsg = `*Directory*: **${this.dbDirList[idx]}**`;
+            if (executionResponseList.hasMigrations() === false) {
+                sqlStatementString += '\n    -- No migration available\n\n';
+                return `${migrationDirMsg}: No migration available\n\n`;
+            }
+            const table = executionResponseList.getExecutedMigrations().reduce((tableRows, version) => {
+                const versionErr = version.getVersionError();
+                const successfullyExecutedStatementList = version.getAppliedStatements();
+                if (versionErr) {
+                    successfullyExecutedStatementList.pop();
+                }
+                const rowString = [
+                    // emoji
+                    fmt[versionErr ? 'failure' : 'success'],
+                    // filename
+                    `${version.getName()}`,
+                    // statements executed
+                    // if a statement has errored out, that will be captured in applied statement. Hence remove it
+                    successfullyExecutedStatementList.length,
+                    // error
+                    versionErr?.getError() ? `${versionErr.getError()}` : '-',
+                    // error statement
+                    versionErr?.getStatement() ? `${versionErr.getStatement()}` : '-'
+                ].join(fmt.rSep);
+                sqlStatementString += `\n-- File: ${version.getName()}\n${successfullyExecutedStatementList.join('\n')}\n`;
+                return `${tableRows}\n${fmt.rSep}${rowString}${fmt.rSep}`;
+            }, fmt.headerBuilder([
+                'Status',
+                'File',
+                `${this.dryRun ? 'Total' : 'Executed'} Statements`,
+                'Error',
+                'Error Statement'
+            ]));
+            sqlStatementString += '\n\n';
+            acc += `${migrationDirMsg}\n${table}\n\n`;
+            return acc;
+        }, '');
+        return [tableStr, sqlStatementString.trim()];
+    }
+    /**
+     * Builds a comment message and context string based on the provided parameters.
+     * If a commentId is present in the migrationMeta, the comment body is used as the context string.
+     * Otherwise, the context string is constructed using the triggeredBy login, eventName, and actionName from the migrationMeta.
+     * The comment message includes information about the migration status, error message (if any), and a link to the GitHub Actions run.
+     * If a table is available, it is also included in the comment message.
+     * @param response - The MigrationRunListResponse object.
+     * @param formatter - The Formatter object used for formatting.
+     * @returns An array containing the comment message and context string.
+     */
+    #build(response, formatter) {
+        const printMsgPrefix = this.dryRun ? '[DryRun]Migrations' : 'Migrations';
+        let printStatus = 'successful';
+        let printEmoji = formatter.success;
+        let printErrMsg = response.errMsg;
+        if (!printErrMsg && response.migrationAvailable === false) {
+            printErrMsg = 'No migrations available';
+        }
+        if (printErrMsg) {
+            printStatus = 'failed';
+            printEmoji = formatter.failure;
+        }
+        const ghActionUrl = `${this.repoBaseURL}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT || '1'}`;
+        const lines = [
+            `${printEmoji} **${printMsgPrefix} ${printStatus}** ${(0, util_1.readableDate)()} ${formatter.linkBuilder('View', ghActionUrl)}`
+        ];
+        if (printErrMsg) {
+            lines.push(`> ${printErrMsg}\n`);
+        }
+        if (response.executionResponseList.length > 0) {
+            const [table, sqlStatements] = this.#buildTableAndSQLStatement(formatter, response);
+            lines.push(table);
+            lines.push(formatter.sqlStatementBuilder(sqlStatements));
+        }
+        return lines.join('\n');
+    }
+    #jira(response) {
+        return this.#build(response, formatters_1.formatterMap.jira);
+    }
+    #github(response) {
+        return this.#build(response, formatters_1.formatterMap.github);
+    }
+    getFormatter(isJiraEvent) {
+        return isJiraEvent === false ? formatters_1.formatterMap.github : formatters_1.formatterMap.jira;
+    }
+    build(isJiraEvent, response) {
+        return isJiraEvent === false ? this.#github(response) : this.#jira(response);
+    }
+}
+exports.CommentBuilder = CommentBuilder;
+
+
+/***/ }),
+
+/***/ 91066:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.formatterMap = void 0;
+/**
+ * A map of formatters for different platforms.
+ */
+exports.formatterMap = {
+    github: {
+        success: '✅',
+        failure: '❌',
+        hSep: '|',
+        rSep: '|',
+        headerBuilder: function githubHeaders(headers) {
+            let headerRow = this.hSep;
+            let secondRow = this.hSep;
+            for (const header of headers) {
+                headerRow += ` ${header} ${this.hSep}`;
+                secondRow += ' --- |';
+            }
+            return `${headerRow}\n${secondRow}`;
+        },
+        userRef: (login) => `@${login}`,
+        linkBuilder: (text, url) => `[${text}](${url})`,
+        sqlStatementBuilder: (text, header) => `<details><summary>${header || 'SQL Statements'}</summary>\n\n\`\`\`sql\n${text}\n\`\`\`\n</details>`
+    },
+    jira: {
+        success: '(/)',
+        failure: '(x)',
+        hSep: '||',
+        rSep: '|',
+        headerBuilder: function jiraHeaders(headers) {
+            return `${this.hSep}${headers.join(this.hSep)}${this.hSep}`;
+        },
+        userRef(login) {
+            return this.linkBuilder(login, `https://github.com/${login}`);
+        },
+        linkBuilder: (text, url) => `[${text}|${url}]`,
+        sqlStatementBuilder: (text, header) => `{code:title=${header || 'SQL Statements'}|borderStyle=solid}\n${text}\n{code}`
+    }
+};
+
+
+/***/ }),
+
 /***/ 6144:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -54728,7 +54891,7 @@ const github = __importStar(__nccwpck_require__(95438));
 const github_1 = __importDefault(__nccwpck_require__(74930));
 const migration_service_1 = __importDefault(__nccwpck_require__(27996));
 const config_1 = __importDefault(__nccwpck_require__(96373));
-const debug_1 = __nccwpck_require__(41417);
+const echo_state_1 = __nccwpck_require__(44902);
 const factory_1 = __nccwpck_require__(99371);
 async function run() {
     const config = (0, config_1.default)();
@@ -54752,10 +54915,13 @@ async function run() {
     config.baseBranch = event.payload.repository.default_branch;
     console.debug(`Event: ${eventName}, Action: ${event.payload.action} on baseBranch=${config.baseBranch}, canProcess=${process}`);
     if (process) {
-        const response = await Promise.allSettled([migrator.processEvent(event), (0, debug_1.dataDumper)()]);
+        const response = await Promise.allSettled([migrator.processEvent(event), (0, echo_state_1.dataDumper)()]);
         if (response[0].status === 'rejected') {
             throw response[0].reason;
         }
+    }
+    else {
+        migrator.skipProcessingHandler(eventName, event.payload || {});
     }
 }
 exports.run = run;
@@ -54794,7 +54960,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(42186));
 const migration_1 = __nccwpck_require__(10469);
-const util_1 = __nccwpck_require__(92629);
+const comment_builder_1 = __nccwpck_require__(13039);
 class MigrationService {
     #client;
     secretClient;
@@ -54873,48 +55039,29 @@ class MigrationService {
         }
         return result;
     }
-    async #addCommentWithFileListing(pullRequest, msg, executionResponseList, migrationMeta) {
-        const fileListForComment = (0, util_1.getFileListingForComment)(executionResponseList, this.#config.databases.map(db => (0, migration_1.getDirectoryForDb)(this.#config.baseDirectory, db)));
-        let commentId;
-        let commentBody;
-        if ('commentId' in migrationMeta) {
-            commentId = migrationMeta.commentId;
-            commentBody = migrationMeta.commentBody;
-        }
-        let commentHandler;
-        let id = 0;
-        let commentMsg = `${msg}\r\n${fileListForComment}`;
+    async #setupComment(isJiraEvent, dryRun, pullRequest, migrationMeta, migrationRunListResponse) {
+        const builder = new comment_builder_1.CommentBuilder(dryRun, pullRequest.base.repo.html_url, this.#config.databases.map(db => (0, migration_1.getDirectoryForDb)(this.#config.baseDirectory, db)));
+        let commentMsg = builder.build(isJiraEvent, migrationRunListResponse);
+        // Write summary for gh action
         core.summary.addRaw(commentMsg);
-        if (commentBody && commentId) {
-            commentHandler = this.#client.updateComment.bind(this.#client);
-            id = commentId;
-            commentMsg = `${commentBody}\r\n\r\n${commentMsg}`;
-            core.debug(`Updating comment=${commentId}\nMsg=${commentMsg}`);
+        let ghCommentPromise;
+        if ('commentId' in migrationMeta) {
+            commentMsg = `${migrationMeta.commentBody}\r\n\r\n${commentMsg}`;
+            ghCommentPromise = this.#client.updateComment(migrationMeta.commentId, commentMsg);
+            core.debug(`Updating comment=${migrationMeta.commentId}\nMsg=${commentMsg}`);
         }
         else {
-            commentHandler = this.#client.addComment.bind(this.#client);
-            id = pullRequest.number;
-            commentMsg = `Executed By: @${migrationMeta.triggeredBy.login}\r\nReason=${migrationMeta.eventName}.${migrationMeta.actionName}\r\n${commentMsg}`;
+            commentMsg = `Executed By: ${builder
+                .getFormatter(isJiraEvent)
+                .userRef(migrationMeta.triggeredBy.login)}\r\nReason=${migrationMeta.eventName}.${migrationMeta.actionName}\r\n${commentMsg}`;
+            ghCommentPromise = this.#client.addComment(pullRequest.number, commentMsg);
             core.debug(`Adding comment ${commentMsg}`);
         }
-        const response = await Promise.allSettled([core.summary.write(), commentHandler(id, commentMsg)]);
+        const response = await Promise.allSettled([core.summary.write(), ghCommentPromise]);
         if (response[1].status === 'rejected') {
             throw response[1].reason;
         }
         return response[1].value;
-    }
-    async #handleDryRunResponse(pullRequest, migrationRunListResponse, commentBuilderFn, migrationMeta) {
-        let msg = '';
-        if (migrationRunListResponse.errMsg !== null) {
-            msg = commentBuilderFn('failed', migrationRunListResponse.errMsg);
-        }
-        else if (migrationRunListResponse.migrationAvailable === false) {
-            msg = commentBuilderFn('failed', 'No migrations available');
-        }
-        else {
-            msg = commentBuilderFn('successful');
-        }
-        await this.#addCommentWithFileListing(pullRequest, msg, migrationRunListResponse.executionResponseList, migrationMeta);
     }
     /**
      * Check if user who triggered action is part of any service owner's team
@@ -54937,7 +55084,6 @@ class MigrationService {
     }
     async #runMigrationsForExecution(pullRequest, migrationMeta) {
         core.info(`fn:runMigrationsForExecution PR#${pullRequest.number}, Dry Run: true, Source=${migrationMeta.source}`);
-        const commentBuilderFn = (0, util_1.commentBuilder)('Migrations', pullRequest.base.repo.html_url, false);
         const [prApprovedByUserList, secretMap] = await Promise.all([
             this.#getRequiredApprovalList(pullRequest.number),
             this.secretClient.getSecrets(this.#config.dbSecretNameList)
@@ -54964,9 +55110,10 @@ class MigrationService {
         else if (this.#validateOwnerTeam(migrationMeta, teams.teamByName) === false) {
             failureMsg = 'User is not part of any owner team';
         }
+        const setupCommentFn = this.#setupComment.bind(this, false, false, pullRequest, migrationMeta);
         if (failureMsg) {
             core.setFailed(failureMsg);
-            await this.#addCommentWithFileListing(pullRequest, commentBuilderFn('failed', failureMsg), [], migrationMeta);
+            await setupCommentFn({ executionResponseList: [], migrationAvailable: false, errMsg: failureMsg });
             return null;
         }
         const migrationRunListResponse = await (0, migration_1.runMigrationFromList)(migrationConfigList, false);
@@ -54975,15 +55122,16 @@ class MigrationService {
             migrationAvailable: migrationRunListResponse.migrationAvailable,
             ignore: false
         };
-        if (migrationRunListResponse.errMsg !== null) {
+        if (migrationRunListResponse.errMsg) {
             result.ignore = true;
-            await this.#addCommentWithFileListing(pullRequest, commentBuilderFn('failed', migrationRunListResponse.errMsg), migrationRunListResponse.executionResponseList, migrationMeta);
+            await setupCommentFn(migrationRunListResponse);
             core.setFailed(migrationRunListResponse.errMsg);
         }
         else if (migrationRunListResponse.migrationAvailable === false) {
             result.ignore = true;
+            migrationRunListResponse.errMsg = 'No migrations available';
             if (pullRequest.labels.some(label => label.name === this.#config.prLabel)) {
-                await this.#addCommentWithFileListing(pullRequest, commentBuilderFn('failed', 'No migrations available'), migrationRunListResponse.executionResponseList, migrationMeta);
+                await setupCommentFn(migrationRunListResponse);
                 core.debug('No migrations available');
             }
         }
@@ -54996,7 +55144,7 @@ class MigrationService {
             successMsg = `${migrationMeta.triggeredBy.login} approved the PR. Migrations ran successfully.`;
         }
         console.log('Ran Successfully: ', successMsg);
-        await this.#addCommentWithFileListing(pullRequest, commentBuilderFn('successful', successMsg), migrationRunListResponse.executionResponseList, migrationMeta);
+        await setupCommentFn(migrationRunListResponse);
         return result;
     }
     async #getRequiredApprovalList(prNumber) {
@@ -55009,7 +55157,8 @@ class MigrationService {
         core.info(`fn:runMigrationForDryRun PR#${pr.number}, Dry Run: true, Source=${migrationMeta.source}`);
         const migrationConfigList = await (0, migration_1.buildMigrationConfigList)(this.#config.baseDirectory, this.#config.databases, await this.secretClient.getSecrets(this.#config.dbSecretNameList));
         const migrationRunListResponse = await (0, migration_1.runMigrationFromList)(migrationConfigList, true);
-        if (migrationRunListResponse.migrationAvailable === false &&
+        if (!migrationRunListResponse.errMsg &&
+            migrationRunListResponse.migrationAvailable === false &&
             migrationMeta.skipCommentWhenNoMigrationsAvailable === true) {
             return {
                 executionResponseList: migrationRunListResponse.executionResponseList,
@@ -55017,7 +55166,7 @@ class MigrationService {
                 ignore: true
             };
         }
-        await this.#handleDryRunResponse(pr, migrationRunListResponse, (0, util_1.commentBuilder)('[DryRun] Migrations', pr.base.repo.html_url, false), migrationMeta);
+        await this.#setupComment(false, true, pr, migrationMeta, migrationRunListResponse);
         return {
             executionResponseList: migrationRunListResponse.executionResponseList,
             migrationAvailable: migrationRunListResponse.migrationAvailable,
@@ -55031,7 +55180,7 @@ class MigrationService {
      */
     async #processPullRequestReview(event) {
         if (!this.#hasLabel(event.payload.pull_request.labels, this.#config.prLabel)) {
-            this.#skipProcessingHandler(`${event.eventName}, reason=label missing`, event.payload);
+            this.skipProcessingHandler(`${event.eventName}, reason=label missing`, event.payload);
             return {
                 executionResponseList: [],
                 migrationAvailable: false,
@@ -55075,7 +55224,7 @@ class MigrationService {
         }
         return result;
     }
-    #skipProcessingHandler(eventName, payload) {
+    skipProcessingHandler(eventName, payload) {
         core.info(`Invalid event: event=${eventName} action=${payload.action}`);
     }
     async processEvent(event) {
@@ -55088,24 +55237,24 @@ class MigrationService {
         }
         if (eventName === 'pull_request_review') {
             if (payload.action !== 'submitted') {
-                return this.#skipProcessingHandler(eventName, payload);
+                return this.skipProcessingHandler(eventName, payload);
             }
             await this.#processPullRequestReview(event);
         }
         else if (eventName === 'issue_comment') {
             if (payload.action !== 'created') {
-                return this.#skipProcessingHandler(eventName, payload);
+                return this.skipProcessingHandler(eventName, payload);
             }
             await this.#processPullRequestComment(event);
         }
         else if (eventName === 'pull_request') {
             if (payload.action !== 'opened' && payload.action !== 'reopened' && payload.action !== 'synchronize') {
-                return this.#skipProcessingHandler(eventName, payload);
+                return this.skipProcessingHandler(eventName, payload);
             }
             await this.#processPullRequest(event);
         }
         else {
-            return this.#skipProcessingHandler(eventName, payload);
+            return this.skipProcessingHandler(eventName, payload);
         }
     }
     async mapIssueToPullRequest(issue) {
@@ -55125,6 +55274,129 @@ class MigrationService {
     }
 }
 exports["default"] = MigrationService;
+
+
+/***/ }),
+
+/***/ 9056:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.AtlasMigrationExecutionResponse = void 0;
+class AtlasVersionExecutionError {
+    statement;
+    error;
+    constructor(statement, error) {
+        this.statement = statement;
+        this.error = error;
+    }
+    getStatement() {
+        return this.statement;
+    }
+    getError() {
+        return this.error;
+    }
+}
+class AtlasVersionExecution {
+    name;
+    version;
+    description;
+    applied;
+    error;
+    constructor(name, version, description, applied = [], error) {
+        this.name = name;
+        this.version = version;
+        this.description = description;
+        this.applied = applied;
+        this.error = error;
+    }
+    static fromVersionExecution(versionExecution) {
+        if (!versionExecution.Applied) {
+            versionExecution.Applied = [];
+        }
+        return new AtlasVersionExecution(versionExecution.Name, versionExecution.Version, versionExecution.Description, versionExecution.Applied, versionExecution.Error
+            ? new AtlasVersionExecutionError(versionExecution.Error.Stmt, versionExecution.Error.Text)
+            : undefined);
+        // return versionExecution
+    }
+    getName() {
+        return this.name;
+    }
+    getVersion() {
+        return this.version;
+    }
+    getDescription() {
+        return this.description;
+    }
+    getAppliedStatements() {
+        return this.applied;
+    }
+    hasAppliedStatements() {
+        return this.getAppliedStatements().length > 0;
+    }
+    getVersionError() {
+        return this.error;
+    }
+}
+/**
+ * Represents the response of a migration execution.
+ */
+class AtlasMigrationExecutionResponse {
+    containsMigrations;
+    migrations;
+    firstError;
+    constructor(containsMigrations, migrations, firstError) {
+        this.containsMigrations = containsMigrations;
+        this.migrations = migrations;
+        this.firstError = firstError;
+    }
+    getSource() {
+        return 'atlas';
+    }
+    static fromError(error) {
+        return new AtlasMigrationExecutionResponse(false, [], error);
+    }
+    static fromResponse(atlasResponse) {
+        let migrations = [];
+        let hasMigrations = false;
+        let firstError;
+        try {
+            const parsedAtlasResponse = JSON.parse(atlasResponse);
+            if (parsedAtlasResponse === null) {
+                throw new Error('null response');
+            }
+            migrations = parsedAtlasResponse.map((versionExecutionJson) => {
+                const versionExecution = AtlasVersionExecution.fromVersionExecution(versionExecutionJson);
+                const statementErr = versionExecution.getVersionError();
+                if (statementErr && !firstError) {
+                    firstError = statementErr.getError();
+                }
+                if (versionExecution.hasAppliedStatements()) {
+                    hasMigrations = true;
+                }
+                return versionExecution;
+            });
+        }
+        catch (ex) {
+            if (atlasResponse && atlasResponse !== 'null') {
+                firstError = atlasResponse;
+            }
+        }
+        return new AtlasMigrationExecutionResponse(hasMigrations, migrations, firstError);
+    }
+    hasMigrations() {
+        return this.containsMigrations;
+    }
+    getFirstError() {
+        return this.firstError;
+    }
+    getExecutedMigrations() {
+        return this.migrations;
+    }
+}
+exports.AtlasMigrationExecutionResponse = AtlasMigrationExecutionResponse;
 
 
 /***/ }),
@@ -55160,6 +55432,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = void 0;
 const util = __importStar(__nccwpck_require__(92629));
+const atlas_class_1 = __nccwpck_require__(9056);
 async function run(migrationConfig) {
     const dirInput = `file://${migrationConfig.dir}`;
     // Generate hash required step as migrate apply need hash
@@ -55171,6 +55444,8 @@ async function run(migrationConfig) {
         dirInput,
         '--url',
         `${migrationConfig.databaseUrl}`,
+        '--format',
+        '"{{ json .Applied }}"',
         '--revisions-schema',
         migrationConfig.schema
     ];
@@ -55180,11 +55455,17 @@ async function run(migrationConfig) {
     if (migrationConfig.baseline) {
         migrateApplyArgs.push('--baseline', migrationConfig.baseline.toString());
     }
-    const response = await util.exec('atlas', migrateApplyArgs);
-    if (response && response.toLowerCase() === 'no migration files to execute') {
-        return '';
+    try {
+        const response = await util.exec('atlas', migrateApplyArgs);
+        return atlas_class_1.AtlasMigrationExecutionResponse.fromResponse(response);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
     }
-    return response;
+    catch (ex) {
+        if (ex.message.startsWith('[')) {
+            return atlas_class_1.AtlasMigrationExecutionResponse.fromResponse(ex.message);
+        }
+        throw ex;
+    }
 }
 exports.run = run;
 
@@ -55229,22 +55510,23 @@ const path_1 = __importDefault(__nccwpck_require__(71017));
 const core = __importStar(__nccwpck_require__(42186));
 const util = __importStar(__nccwpck_require__(92629));
 const atlas = __importStar(__nccwpck_require__(77441));
+const atlas_class_1 = __nccwpck_require__(9056);
 exports.TEMP_DIR_FOR_MIGRATION = 'tmp/__migrations__';
 function getDirectoryForDb(baseDirectory, dbConfig) {
-    return path_1.default.join(baseDirectory, dbConfig.directory);
+    return path_1.default.join(process.env.LOCAL_TESTING_REPO_DIR || '', baseDirectory, dbConfig.directory);
 }
 exports.getDirectoryForDb = getDirectoryForDb;
 async function buildMigrationConfigList(baseDirectory, databases, secrets) {
     const migrationConfigList = [];
     await util.cleanDir(exports.TEMP_DIR_FOR_MIGRATION);
     for (const dbConfig of databases) {
+        if (!secrets[dbConfig.envName]) {
+            throw new Error(`Secret ${dbConfig.envName} not found`);
+        }
         // const sourceDir = path.join(config.baseDirectory, dbConfig.directory)
         const sourceDir = getDirectoryForDb(baseDirectory, dbConfig);
         const tempMigrationSQLDir = await util.createTempDir(path_1.default.join(exports.TEMP_DIR_FOR_MIGRATION, dbConfig.directory));
         await ensureSQLFilesInMigrationDir(sourceDir, tempMigrationSQLDir);
-        if (!secrets[dbConfig.envName]) {
-            throw new Error(`Secret ${dbConfig.envName} not found`);
-        }
         migrationConfigList.push({
             databaseUrl: secrets[dbConfig.envName],
             dir: tempMigrationSQLDir,
@@ -55264,36 +55546,30 @@ function setDryRun(migrationConfigList, dryRun) {
 exports.setDryRun = setDryRun;
 async function runMigrationFromList(migrationConfigList, dryRun) {
     let migrationAvailable = false;
-    let errMsg = null;
+    let errMsg;
     const migrationResponseList = [];
     for (const migrationConfig of migrationConfigList) {
         migrationConfig.dryRun = dryRun;
+        let response;
         try {
-            const response = await atlas.run(migrationConfig);
-            if (response) {
+            response = await atlas.run(migrationConfig);
+            if (response.hasMigrations()) {
                 migrationAvailable = true;
             }
-            migrationResponseList.push({
-                source: 'atlas',
-                response
-            });
+            if (response.getFirstError()) {
+                errMsg = response.getFirstError();
+            }
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         }
         catch (ex) {
-            const msg = `Dir=${migrationConfig.dir} ${ex.message}`;
-            if (errMsg === null) {
-                errMsg = msg;
+            const exceptionMessage = ex.message || `${ex}`;
+            if (!errMsg) {
+                errMsg = ex.message || `${ex}`;
             }
-            else {
-                errMsg = `${errMsg}\r\n${msg}`;
-            }
-            migrationResponseList.push({
-                source: 'atlas',
-                response: '',
-                error: ex.message
-            });
-            console.log(errMsg, ex.stack);
+            response = atlas_class_1.AtlasMigrationExecutionResponse.fromError(exceptionMessage);
+            core.info(`Exception[tmp_dir=${migrationConfig.dir}]: ${ex}`);
         }
+        migrationResponseList.push(response);
     }
     const response = {
         migrationAvailable,
@@ -55353,7 +55629,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.exec = exports.getFileListingForComment = exports.commentBuilder = exports.getInput = exports.getEnv = exports.cleanDir = exports.removeDir = exports.createTempDir = void 0;
+exports.readableDate = exports.exec = exports.getInput = exports.getEnv = exports.cleanDir = exports.removeDir = exports.createTempDir = void 0;
 const core = __importStar(__nccwpck_require__(42186));
 const child_process_1 = __nccwpck_require__(32081);
 const fs_1 = __importDefault(__nccwpck_require__(57147));
@@ -55405,38 +55681,7 @@ function readableDate() {
         timeZone: 'Asia/Calcutta'
     });
 }
-function commentBuilder(msgPrefix, htmlURL, isJiraEvent) {
-    return (boldText, msg) => {
-        let returnMsg = `**${msgPrefix} ${boldText}** ${readableDate()} (${buildExecutionMarkdown(htmlURL, isJiraEvent)})`;
-        if (msg) {
-            returnMsg = `${returnMsg}: ${msg}`;
-        }
-        return returnMsg;
-    };
-}
-exports.commentBuilder = commentBuilder;
-function buildExecutionMarkdown(htmlURL, isJiraEvent) {
-    const executionURL = `${htmlURL}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`;
-    if (isJiraEvent !== true) {
-        return `[Execution](${executionURL})`;
-    }
-    return `[Execution|${executionURL}]`;
-}
-function getFileListingForComment(migrationFileListByDirectory, dbDirList) {
-    return migrationFileListByDirectory
-        .reduce((acc, response, idx) => {
-        acc.push(`- Directory: **'${dbDirList[idx]}'**`);
-        if (response.response === '') {
-            acc.push('  Files: NA');
-        }
-        else {
-            acc.push(`\`\`\`\n${response.response}\n\`\`\``);
-        }
-        return acc;
-    }, [''])
-        .join('\r\n');
-}
-exports.getFileListingForComment = getFileListingForComment;
+exports.readableDate = readableDate;
 async function exec(command, args) {
     return new Promise((resolve, reject) => {
         // Spawn the process
@@ -55457,16 +55702,15 @@ async function exec(command, args) {
         // Resolve the promise when the process exits
         process.on('close', code => {
             output = output.trim();
+            if (output.startsWith('"') && output.endsWith('"')) {
+                output = output.slice(1, -1);
+            }
             core.debug(`Command: ${command} ${args.join(' ')}\n\tcode=${code} output=${output}`);
             if (code === 0) {
                 resolve(output);
             }
             else {
-                let errMsg = `Process "${command} ${args.join(' ')}" exited with code ${code}`;
-                if (output) {
-                    errMsg += `\n${output}`;
-                }
-                reject(new Error(errMsg));
+                reject(new Error(output));
             }
         });
     });

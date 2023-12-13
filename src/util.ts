@@ -1,7 +1,6 @@
 import * as core from '@actions/core'
 import { spawn } from 'child_process'
 import fs from 'fs'
-import { MigrationResponse } from './types'
 
 export type CommentBuilderHandler = (boldText: string, msg?: string) => string
 
@@ -53,41 +52,6 @@ function readableDate(): string {
   })
 }
 
-function commentBuilder(msgPrefix: string, htmlURL: string, isJiraEvent: boolean): CommentBuilderHandler {
-  return (boldText: string, msg?: string): string => {
-    let returnMsg = `**${msgPrefix} ${boldText}** ${readableDate()} (${buildExecutionMarkdown(htmlURL, isJiraEvent)})`
-    if (msg) {
-      returnMsg = `${returnMsg}: ${msg}`
-    }
-    return returnMsg
-  }
-}
-
-function buildExecutionMarkdown(htmlURL: string, isJiraEvent: boolean): string {
-  const executionURL = `${htmlURL}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`
-  if (isJiraEvent !== true) {
-    return `[Execution](${executionURL})`
-  }
-  return `[Execution|${executionURL}]`
-}
-
-function getFileListingForComment(migrationFileListByDirectory: MigrationResponse[], dbDirList: string[]): string {
-  return migrationFileListByDirectory
-    .reduce<string[]>(
-      (acc, response, idx) => {
-        acc.push(`- Directory: **'${dbDirList[idx]}'**`)
-        if (response.response === '') {
-          acc.push('  Files: NA')
-        } else {
-          acc.push(`\`\`\`\n${response.response}\n\`\`\``)
-        }
-        return acc
-      },
-      ['']
-    )
-    .join('\r\n')
-}
-
 async function exec(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     // Spawn the process
@@ -113,18 +77,17 @@ async function exec(command: string, args: string[]): Promise<string> {
     // Resolve the promise when the process exits
     process.on('close', code => {
       output = output.trim()
+      if (output.startsWith('"') && output.endsWith('"')) {
+        output = output.slice(1, -1)
+      }
       core.debug(`Command: ${command} ${args.join(' ')}\n\tcode=${code} output=${output}`)
       if (code === 0) {
         resolve(output)
       } else {
-        let errMsg = `Process "${command} ${args.join(' ')}" exited with code ${code}`
-        if (output) {
-          errMsg += `\n${output}`
-        }
-        reject(new Error(errMsg))
+        reject(new Error(output))
       }
     })
   })
 }
 
-export { createTempDir, removeDir, cleanDir, getEnv, getInput, commentBuilder, getFileListingForComment, exec }
+export { createTempDir, removeDir, cleanDir, getEnv, getInput, exec, readableDate }

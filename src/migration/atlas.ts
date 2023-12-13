@@ -1,7 +1,8 @@
-import { MigrationConfig } from '../types'
 import * as util from '../util'
+import { AtlasMigrationExecutionResponse } from './atlas-class'
+import { MigrationConfig, MigrationExecutionResponse } from '../types'
 
-async function run(migrationConfig: MigrationConfig): Promise<string> {
+async function run(migrationConfig: MigrationConfig): Promise<MigrationExecutionResponse> {
   const dirInput = `file://${migrationConfig.dir}`
 
   // Generate hash required step as migrate apply need hash
@@ -14,6 +15,8 @@ async function run(migrationConfig: MigrationConfig): Promise<string> {
     dirInput,
     '--url',
     `${migrationConfig.databaseUrl}`,
+    '--format',
+    '"{{ json .Applied }}"',
     '--revisions-schema',
     migrationConfig.schema
   ]
@@ -25,11 +28,16 @@ async function run(migrationConfig: MigrationConfig): Promise<string> {
     migrateApplyArgs.push('--baseline', migrationConfig.baseline.toString())
   }
 
-  const response = await util.exec('atlas', migrateApplyArgs)
-  if (response && response.toLowerCase() === 'no migration files to execute') {
-    return ''
+  try {
+    const response = await util.exec('atlas', migrateApplyArgs)
+    return AtlasMigrationExecutionResponse.fromResponse(response)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (ex: any) {
+    if (ex.message.startsWith('[')) {
+      return AtlasMigrationExecutionResponse.fromResponse(ex.message)
+    }
+    throw ex
   }
-  return response
 }
 
 export { run }

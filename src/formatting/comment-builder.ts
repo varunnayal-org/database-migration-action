@@ -1,0 +1,130 @@
+import { Formatter, MigrationRunListResponse } from '../types'
+import { readableDate } from '../util'
+import { formatterMap } from './formatters'
+
+type BuildResponse = string
+
+export class CommentBuilder {
+  constructor(
+    private dryRun: boolean,
+    private repoBaseURL: string,
+    private dbDirList: string[]
+  ) {}
+
+  #buildTableAndSQLStatement(fmt: Formatter, response: MigrationRunListResponse): [string, string] {
+    let sqlStatementString = ''
+
+    const tableStr = response.executionResponseList.reduce<string>((acc, executionResponseList, idx) => {
+      sqlStatementString += `-- DIRECTORY: ${this.dbDirList[idx]}`
+      const migrationDirMsg = `*Directory*: **${this.dbDirList[idx]}**`
+      if (executionResponseList.hasMigrations() === false) {
+        sqlStatementString += '\n    -- No migration available\n\n'
+        return `${migrationDirMsg}: No migration available\n\n`
+      }
+
+      const table = executionResponseList.getExecutedMigrations().reduce<string>(
+        (tableRows, version) => {
+          const versionErr = version.getVersionError()
+          const successfullyExecutedStatementList = version.getAppliedStatements()
+          if (versionErr) {
+            successfullyExecutedStatementList.pop()
+          }
+          const rowString = [
+            // emoji
+            fmt[versionErr ? 'failure' : 'success'],
+            // filename
+            `${version.getName()}`,
+            // statements executed
+            // if a statement has errored out, that will be captured in applied statement. Hence remove it
+            successfullyExecutedStatementList.length,
+            // error
+            versionErr?.getError() ? `${versionErr.getError()}` : '-',
+            // error statement
+            versionErr?.getStatement() ? `${versionErr.getStatement()}` : '-'
+          ].join(fmt.rSep)
+
+          sqlStatementString += `\n-- File: ${version.getName()}\n${successfullyExecutedStatementList.join('\n')}\n`
+          return `${tableRows}\n${fmt.rSep}${rowString}${fmt.rSep}`
+        },
+        fmt.headerBuilder([
+          'Status',
+          'File',
+          `${this.dryRun ? 'Total' : 'Executed'} Statements`,
+          'Error',
+          'Error Statement'
+        ])
+      )
+
+      sqlStatementString += '\n\n'
+      acc += `${migrationDirMsg}\n${table}\n\n`
+      return acc
+    }, '')
+
+    return [tableStr, sqlStatementString.trim()]
+  }
+
+  /**
+   * Builds a comment message and context string based on the provided parameters.
+   * If a commentId is present in the migrationMeta, the comment body is used as the context string.
+   * Otherwise, the context string is constructed using the triggeredBy login, eventName, and actionName from the migrationMeta.
+   * The comment message includes information about the migration status, error message (if any), and a link to the GitHub Actions run.
+   * If a table is available, it is also included in the comment message.
+   * @param response - The MigrationRunListResponse object.
+   * @param formatter - The Formatter object used for formatting.
+   * @returns An array containing the comment message and context string.
+   */
+  #build(response: MigrationRunListResponse, formatter: Formatter): BuildResponse {
+    const printMsgPrefix = this.dryRun ? '[DryRun]Migrations' : 'Migrations'
+    let printStatus = 'successful'
+    let printEmoji = formatter.success
+
+    let printErrMsg = response.errMsg
+    if (!printErrMsg && response.migrationAvailable === false) {
+      printErrMsg = 'No migrations available'
+    }
+
+    if (printErrMsg) {
+      printStatus = 'failed'
+      printEmoji = formatter.failure
+    }
+
+    const ghActionUrl = `${this.repoBaseURL}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${
+      process.env.GITHUB_RUN_ATTEMPT || '1'
+    }`
+
+    const lines = [
+      `${printEmoji} **${printMsgPrefix} ${printStatus}** ${readableDate()} ${formatter.linkBuilder(
+        'View',
+        ghActionUrl
+      )}`
+    ]
+
+    if (printErrMsg) {
+      lines.push(`> ${printErrMsg}\n`)
+    }
+
+    if (response.executionResponseList.length > 0) {
+      const [table, sqlStatements] = this.#buildTableAndSQLStatement(formatter, response)
+      lines.push(table)
+      lines.push(formatter.sqlStatementBuilder(sqlStatements))
+    }
+
+    return lines.join('\n')
+  }
+
+  #jira(response: MigrationRunListResponse): BuildResponse {
+    return this.#build(response, formatterMap.jira)
+  }
+
+  #github(response: MigrationRunListResponse): BuildResponse {
+    return this.#build(response, formatterMap.github)
+  }
+
+  getFormatter(isJiraEvent: boolean): Formatter {
+    return isJiraEvent === false ? formatterMap.github : formatterMap.jira
+  }
+
+  build(isJiraEvent: boolean, response: MigrationRunListResponse): BuildResponse {
+    return isJiraEvent === false ? this.#github(response) : this.#jira(response)
+  }
+}

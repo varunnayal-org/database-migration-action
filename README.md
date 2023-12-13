@@ -44,7 +44,7 @@
   - [ ] Github action times out waiting for a long running migration to execute
   - [ ] Does every file change runs withing a transaction block
   - [ ] [How to use lock_timeout and statement_timeout](https://postgres.ai/blog/20210923-zero-downtime-postgres-schema-migrations-lock-timeout-and-retries)
-- [ ] Handle [out or order](./docs/cases.md#out-or-order) changes
+- [ ] Handle [out or order](./docs/cases.md#out-of-order) changes
   - [x] Will be solved in atlas v0.16.x release. Current release is [v0.15.0](https://github.com/ariga/atlas/releases/tag/v0.15.0).
 
 ### POC
@@ -57,6 +57,7 @@
 
     ```sql
     -- atlas:txmode none
+
     -- creating index on my_table
     create index concurrently idx_my_index on my_table(my_column)
     create index concurrently idx_my_index_2 on my_table_other(my_column)
