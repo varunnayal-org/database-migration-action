@@ -1,3 +1,4 @@
+import { JiraIssue } from './client/jira'
 import { User } from './types.gha'
 
 export interface MigrationRunListResponse {
@@ -23,6 +24,7 @@ export interface MatchTeamWithPRApproverResult {
 export interface RunMigrationResult {
   executionResponseList: MigrationExecutionResponse[]
   migrationAvailable: boolean
+  jiraIssue?: JiraIssue
   ignore: boolean
 }
 
@@ -30,6 +32,8 @@ export type MigrationMeta = {
   eventName: string
   actionName: string
   triggeredBy: User
+  // Set this to true only when PR event is received(i.e PR (re)opened, synchronized)
+  ensureJiraTicket?: boolean
   skipCommentWhenNoMigrationsAvailable?: boolean
 } & (
   | {
@@ -140,8 +144,15 @@ export interface Formatter {
   failure: string
   hSep: string
   rSep: string
+  /**
+   * Table column value escape
+   * @param value
+   * @returns
+   */
+  cEsc: (value: string) => string
   headerBuilder: (headers: string[]) => string
   userRef: (login: string) => string
   linkBuilder: (text: string, url: string) => string
+  quoteBuilder: (text: string) => string
   sqlStatementBuilder: (text: string, header?: string) => string
 }

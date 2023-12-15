@@ -13,8 +13,6 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
     'apply',
     '--dir',
     dirInput,
-    '--url',
-    `${migrationConfig.databaseUrl}`,
     '--format',
     '"{{ json .Applied }}"',
     '--revisions-schema',
@@ -27,6 +25,9 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
   if (migrationConfig.baseline) {
     migrateApplyArgs.push('--baseline', migrationConfig.baseline.toString())
   }
+
+  // Ensure URL field is at the end so that it doesn't get printed in the logs
+  migrateApplyArgs.push('--url', migrationConfig.databaseUrl)
 
   try {
     const response = await util.exec('atlas', migrateApplyArgs)

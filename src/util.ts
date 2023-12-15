@@ -80,7 +80,7 @@ async function exec(command: string, args: string[]): Promise<string> {
       if (output.startsWith('"') && output.endsWith('"')) {
         output = output.slice(1, -1)
       }
-      core.debug(`Command: ${command} ${args.join(' ')}\n\tcode=${code} output=${output}`)
+      core.debug(`Command: ${[command, ...args.slice(0, -1), '***']}code=${code} output=${output}`)
       if (code === 0) {
         resolve(output)
       } else {

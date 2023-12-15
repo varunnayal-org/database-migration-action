@@ -8,6 +8,13 @@ inputs:
   repo_token:
     description: 'GitHub token'
     required: true
+  jira_username:
+    description: JIRA username
+  jira_password:
+    description: JIRA password
+  jira_config:
+    description: 'JIRA config token having following keys host, project, issueType("Story"), fields.pr, fields.prLabel, fields?.repo, fields.driApprovals, approvalStatus("DONE"), doneValue("Done")'
+    required: true
   aws_secret_store:
     description: AWS Secret ID where database connection strings are stored
   migration_config_file:
@@ -110,6 +117,9 @@ runs:
       run: node $GITHUB_ACTION_PATH/dist/index.js
       env:
         INPUT_REPO_TOKEN: ${{ inputs.repo_token }}
+        INPUT_JIRA_USERNAME: ${{ inputs.jira_username }}
+        INPUT_JIRA_PASSWORD: ${{ inputs.jira_password }}
+        INPUT_JIRA_CONFIG: ${{ inputs.jira_config }}
         INPUT_AWS_SECRET_STORE: ${{ inputs.aws_secret_store }}
         INPUT_MIGRATION_CONFIG_FILE: ${{ inputs.migration_config_file }}
         INPUT_DEBUG: ${{ inputs.debug }}

@@ -1,20 +1,34 @@
 import * as core from '@actions/core'
 import GHClient, { IssueCreateCommentResponse, IssueUpdateCommentResponse } from './client/github'
+import JiraClient, { JiraComment, JiraIssue } from './client/jira'
 import { Config } from './config'
 import * as gha from './types.gha'
 import { runMigrationFromList, buildMigrationConfigList, getDirectoryForDb } from './migration/migration'
 import { MigrationRunListResponse, MatchTeamWithPRApproverResult, RunMigrationResult, MigrationMeta } from './types'
 import { VaultClient } from './client/vault/types'
-import { CommentBuilder } from './formatting/comment-builder'
+import { TextBuilder } from './formatting/text-builder'
+
+type SetupCommentInfo = {
+  githubSummaryText: string
+  githubComment: IssueCreateCommentResponse | IssueUpdateCommentResponse
+  jiraIssue: JiraIssue | undefined
+  jiraComment?: JiraComment
+}
+
+const CMD_DRY_RUN = 'db migrate dry-run'
+const CMD_DRY_RUN_JIRA = 'db migrate jira'
+const CMD_APPLY = 'db migrate'
 
 export default class MigrationService {
-  #client: GHClient
+  #ghClient: GHClient
+  #jiraClient: JiraClient | null
   secretClient: VaultClient
   #config: Config
 
-  constructor(config: Config, client: GHClient, secretClient: VaultClient) {
+  constructor(config: Config, client: GHClient, jiraClient: JiraClient | null, secretClient: VaultClient) {
     this.#config = config
-    this.#client = client
+    this.#ghClient = client
+    this.#jiraClient = jiraClient
     this.secretClient = secretClient
   }
 
@@ -33,11 +47,17 @@ export default class MigrationService {
     return labels.some(labelEntry => labelEntry.name === label)
   }
 
-  async #ensureLabel(prNumber: number, labels: gha.Label[], label: string): Promise<void> {
-    if (this.#hasLabel(labels, label)) {
-      return
+  async #ensureLabels(pullRequest: gha.PullRequest, jiraIssue?: JiraIssue): Promise<void> {
+    let labelsToAdd = [this.#config.prLabel]
+    if (jiraIssue) {
+      labelsToAdd.push('jira-ticket-created')
     }
-    await this.#client.addLabel(prNumber, label)
+
+    labelsToAdd = labelsToAdd.filter(label => !this.#hasLabel(pullRequest.labels, label))
+
+    if (labelsToAdd.length > 0) {
+      await this.#ghClient.addLabel(pullRequest.number, labelsToAdd)
+    }
   }
 
   /**
@@ -51,21 +71,26 @@ export default class MigrationService {
       eventName: event.eventName,
       actionName: payload.action,
       source: 'pr',
-      triggeredBy: payload.pull_request.user
+      triggeredBy: payload.pull_request.user,
+      ensureJiraTicket: true
     })
 
     if (result.migrationAvailable) {
-      // We can create JIRA ticket if required
-      await this.#ensureLabel(payload.number, payload.pull_request.labels, this.#config.prLabel)
+      await this.#ensureLabels(payload.pull_request, result.jiraIssue)
     }
     return result
   }
 
+  /**
+   *
+   * @param prApprovedByUserList This list is empty even if PR has been approved if config.approvalTeams is empty
+   * @returns
+   */
   async #matchTeamWithPRApprovers(prApprovedByUserList: string[]): Promise<MatchTeamWithPRApproverResult> {
     // No need to call API when
-    // - no approvals are required
-    // - or, no one has approved the PR yet
-    if (prApprovedByUserList.length === 0) {
+    // - approvals are required
+    // - and, no one has approved the PR yet
+    if (this.#config.approvalTeams.length > 0 && prApprovedByUserList.length === 0) {
       return this.#config.approvalTeams.reduce<MatchTeamWithPRApproverResult>(
         (acc, teamName) => {
           acc.prApprovedUserListByTeam[teamName] = []
@@ -79,7 +104,7 @@ export default class MigrationService {
       )
     }
 
-    const teamByName = await this.#client.getUserForTeams(this.#config.allTeams, 100)
+    const teamByName = await this.#ghClient.getUserForTeams(this.#config.allTeams, 100)
 
     const result: MatchTeamWithPRApproverResult = {
       teamByName,
@@ -98,46 +123,104 @@ export default class MigrationService {
     return result
   }
 
-  async #setupComment(
-    isJiraEvent: boolean,
+  async #buildCommentInfo(
     dryRun: boolean,
     pullRequest: gha.PullRequest,
     migrationMeta: MigrationMeta,
-    migrationRunListResponse: MigrationRunListResponse
-  ): Promise<IssueUpdateCommentResponse | IssueCreateCommentResponse> {
-    const builder = new CommentBuilder(
+    migrationRunListResponse: MigrationRunListResponse,
+    jiraIssue?: JiraIssue | null | undefined
+  ): Promise<SetupCommentInfo> {
+    const builder = new TextBuilder(
       dryRun,
+      pullRequest.html_url,
       pullRequest.base.repo.html_url,
       this.#config.databases.map(db => getDirectoryForDb(this.#config.baseDirectory, db))
     )
 
-    let commentMsg = builder.build(isJiraEvent, migrationRunListResponse)
-
-    // Write summary for gh action
-    core.summary.addRaw(commentMsg)
+    // Github
+    const githubSummaryText = builder.github(migrationRunListResponse)
+    core.summary.addRaw(githubSummaryText)
 
     let ghCommentPromise: Promise<IssueUpdateCommentResponse | IssueCreateCommentResponse>
     if ('commentId' in migrationMeta) {
-      commentMsg = `${migrationMeta.commentBody}\r\n\r\n${commentMsg}`
-      ghCommentPromise = this.#client.updateComment(migrationMeta.commentId, commentMsg)
-      core.debug(`Updating comment=${migrationMeta.commentId}\nMsg=${commentMsg}`)
+      ghCommentPromise = this.#ghClient.updateComment(
+        migrationMeta.commentId,
+        `${migrationMeta.commentBody}\r\n\r\n${githubSummaryText}`
+      )
     } else {
-      commentMsg = `Executed By: ${builder
-        .getFormatter(isJiraEvent)
-        .userRef(migrationMeta.triggeredBy.login)}\r\nReason=${migrationMeta.eventName}.${
-        migrationMeta.actionName
-      }\r\n${commentMsg}`
-      ghCommentPromise = this.#client.addComment(pullRequest.number, commentMsg)
-      core.debug(`Adding comment ${commentMsg}`)
+      ghCommentPromise = this.#ghClient.addComment(
+        pullRequest.number,
+        `Executed By: ${builder.getFormatter('github').userRef(migrationMeta.triggeredBy.login)}\r\nReason=${
+          migrationMeta.eventName
+        }.${migrationMeta.actionName}\r\n${githubSummaryText}`
+      )
     }
 
-    const response = await Promise.allSettled([core.summary.write(), ghCommentPromise])
+    // Jira
+    let jiraIssuePromise: Promise<JiraIssue | undefined> = Promise.resolve(undefined)
+    let jiraCommentPromise: Promise<JiraComment | undefined> = Promise.resolve(undefined)
 
+    const canIntegrateWithJira =
+      // if applying migration
+      dryRun === false ||
+      // else for dry run
+      // if a pr event (open, reopen, sync)
+      !!(
+        migrationMeta.ensureJiraTicket &&
+        // migration should be available
+        migrationRunListResponse.migrationAvailable &&
+        // no error message should exists
+        (!migrationRunListResponse.errMsg || jiraIssue)
+      )
+
+    core.debug(`Can create JIRA Issue or Command: ${canIntegrateWithJira ? 'Yes' : 'No'}`)
+    if (canIntegrateWithJira && this.#jiraClient) {
+      if (jiraIssue === undefined) {
+        jiraIssue = await this.#jiraClient.findIssue(pullRequest.html_url)
+      }
+      const issueComment = builder.jira(migrationRunListResponse)
+
+      // Add issue or comment
+      if (jiraIssue) {
+        jiraCommentPromise = this.#jiraClient.addComment(jiraIssue.id, issueComment)
+        jiraIssuePromise = Promise.resolve(jiraIssue)
+      } else {
+        jiraIssuePromise = this.#jiraClient.createIssue({
+          title: builder.jiraTitle(this.#config.serviceName),
+          description: builder.jiraDescription(issueComment),
+          prLink: pullRequest.html_url,
+          repoLink: pullRequest.base.repo.html_url,
+          prNumber: pullRequest.number
+        })
+      }
+    }
+
+    const response = await Promise.allSettled([
+      ghCommentPromise,
+      jiraIssuePromise,
+      jiraCommentPromise,
+      core.summary.write()
+    ])
+
+    if (response[0].status === 'rejected') {
+      core.error('GHCommentError: ', response[0].reason)
+      throw response[0].reason
+    }
     if (response[1].status === 'rejected') {
+      core.error('JiraIssueError: ', response[1].reason)
       throw response[1].reason
     }
+    if (response[2].status === 'rejected') {
+      core.error('JiraCommentError: ', response[2].reason)
+      throw response[2].reason
+    }
 
-    return response[1].value
+    return {
+      githubSummaryText,
+      githubComment: response[0].value,
+      jiraIssue: response[1].value,
+      jiraComment: response[2].value
+    }
   }
 
   /**
@@ -161,45 +244,84 @@ export default class MigrationService {
     })
   }
 
+  #validateMigrationExecutionForApproval(
+    pullRequest: gha.PullRequest,
+    migrationMeta: MigrationMeta,
+    teams: MatchTeamWithPRApproverResult
+  ): string | undefined {
+    // If required approvals are not in place
+    if (teams.approvalMissingFromTeam.length > 0) {
+      return `PR is not approved by ${teams.approvalMissingFromTeam
+        .map(teamName => `@${pullRequest.base.repo.owner.login}/${teamName}`)
+        .join(', ')}`
+    }
+
+    // If user who triggered action is not part of any owner team
+    if (this.#validateOwnerTeam(migrationMeta, teams.teamByName) === false) {
+      return 'User is not part of any owner team'
+    }
+  }
+
+  #validateMigrationExecutionForJiraApproval(jiraIssue?: JiraIssue | null | undefined): string | undefined {
+    const jiraConfig = this.#config.jira
+    if (!jiraConfig) {
+      return undefined
+    }
+
+    // Jira ticket not created
+    if (!jiraIssue) {
+      return `JIRA Issue not found. Please add comment *${CMD_DRY_RUN}* to create JIRA ticket`
+    }
+
+    // Ticket not resolved
+    if (jiraIssue.fields.resolution?.name !== jiraConfig.doneValue) {
+      return `JIRA issue ${jiraIssue.key} is not resolved yet ${jiraIssue.fields.resolution?.name || 'NA'}`
+    }
+    // DRI Approvals missing
+    const missingDRIApprovals = jiraConfig.fields.driApprovals.filter(field => {
+      if (!jiraIssue.fields[field]) {
+        return true
+      }
+      return jiraIssue.fields[field].value !== jiraConfig.approvalStatus
+    })
+    if (missingDRIApprovals.length > 0) {
+      return `JIRA Issue is not approved by DRIs ${missingDRIApprovals}`
+    }
+    return undefined
+  }
+
   async #runMigrationsForExecution(
     pullRequest: gha.PullRequest,
     migrationMeta: MigrationMeta
   ): Promise<RunMigrationResult | null> {
+    // TODO: Check for label db-migration
     core.info(`fn:runMigrationsForExecution PR#${pullRequest.number}, Dry Run: true, Source=${migrationMeta.source}`)
     const [prApprovedByUserList, secretMap] = await Promise.all([
       this.#getRequiredApprovalList(pullRequest.number),
       this.secretClient.getSecrets(this.#config.dbSecretNameList)
     ])
 
-    /**
-     * 1. Get migration file listing
-     * 2. Get github teams
-     */
-    const [teams, migrationConfigList] = await Promise.all([
-      // Fetch approved grouped by allowed teams
-      this.#matchTeamWithPRApprovers(prApprovedByUserList),
+    const [migrationConfigList, jiraIssue] = await Promise.all([
       // Build configuration
-      buildMigrationConfigList(this.#config.baseDirectory, this.#config.databases, secretMap)
+      buildMigrationConfigList(this.#config.baseDirectory, this.#config.databases, secretMap),
+      // Fetch JIRA Issue
+      this.#jiraClient?.findIssue(pullRequest.html_url) ?? Promise.resolve(undefined)
     ])
 
-    core.debug(`matchTeamWithPRApprovers: ${JSON.stringify(teams)}`)
+    let failureMsg = this.#validateMigrationExecutionForJiraApproval(jiraIssue)
 
-    let failureMsg = ''
-    // If required approvals are not in place
-    if (teams.approvalMissingFromTeam.length > 0) {
-      failureMsg = `PR is not approved by ${teams.approvalMissingFromTeam
-        .map(teamName => `@${pullRequest.base.repo.owner.login}/${teamName}`)
-        .join(', ')}`
-    }
-    // If user who triggered action is not part of any owner team
-    else if (this.#validateOwnerTeam(migrationMeta, teams.teamByName) === false) {
-      failureMsg = 'User is not part of any owner team'
+    if (!failureMsg) {
+      // Fetch approved grouped by allowed teams
+      const teams = await this.#matchTeamWithPRApprovers(prApprovedByUserList)
+      core.debug(`matchTeamWithPRApprovers: ${JSON.stringify(teams)}`)
+      failureMsg = this.#validateMigrationExecutionForApproval(pullRequest, migrationMeta, teams)
     }
 
-    const setupCommentFn = this.#setupComment.bind(this, false, false, pullRequest, migrationMeta)
+    const buildCommentInfoFn = this.#buildCommentInfo.bind(this, false, pullRequest, migrationMeta)
+
     if (failureMsg) {
       core.setFailed(failureMsg)
-      await setupCommentFn({ executionResponseList: [], migrationAvailable: false, errMsg: failureMsg })
+      await buildCommentInfoFn({ executionResponseList: [], migrationAvailable: false, errMsg: failureMsg })
       return null
     }
 
@@ -213,13 +335,13 @@ export default class MigrationService {
 
     if (migrationRunListResponse.errMsg) {
       result.ignore = true
-      await setupCommentFn(migrationRunListResponse)
+      await buildCommentInfoFn(migrationRunListResponse)
       core.setFailed(migrationRunListResponse.errMsg)
     } else if (migrationRunListResponse.migrationAvailable === false) {
       result.ignore = true
       migrationRunListResponse.errMsg = 'No migrations available'
       if (pullRequest.labels.some(label => label.name === this.#config.prLabel)) {
-        await setupCommentFn(migrationRunListResponse)
+        await buildCommentInfoFn(migrationRunListResponse)
         core.debug('No migrations available')
       }
     }
@@ -234,9 +356,9 @@ export default class MigrationService {
       successMsg = `${migrationMeta.triggeredBy.login} approved the PR. Migrations ran successfully.`
     }
 
-    console.log('Ran Successfully: ', successMsg)
+    core.debug(`Ran Successfully: ${successMsg}`)
 
-    await setupCommentFn(migrationRunListResponse)
+    await buildCommentInfoFn(migrationRunListResponse)
 
     return result
   }
@@ -245,7 +367,7 @@ export default class MigrationService {
     if (this.#config.approvalTeams.length === 0) {
       return await Promise.resolve([])
     }
-    return await this.#client.getPullRequestApprovedUserList(prNumber)
+    return await this.#ghClient.getPullRequestApprovedUserList(prNumber)
   }
 
   async #runMigrationForDryRun(pr: gha.PullRequest, migrationMeta: MigrationMeta): Promise<RunMigrationResult> {
@@ -270,11 +392,12 @@ export default class MigrationService {
       }
     }
 
-    await this.#setupComment(false, true, pr, migrationMeta, migrationRunListResponse)
+    const { jiraIssue } = await this.#buildCommentInfo(true, pr, migrationMeta, migrationRunListResponse)
 
     return {
       executionResponseList: migrationRunListResponse.executionResponseList,
       migrationAvailable: migrationRunListResponse.migrationAvailable,
+      jiraIssue,
       ignore: true
     }
   }
@@ -303,8 +426,7 @@ export default class MigrationService {
     })
 
     if (result.migrationAvailable) {
-      // We can create JIRA ticket if required
-      await this.#ensureLabel(payload.pull_request.number, payload.pull_request.labels, this.#config.prLabel)
+      await this.#ensureLabels(payload.pull_request, result.jiraIssue)
     }
     return result
   }
@@ -321,15 +443,17 @@ export default class MigrationService {
       commentBody: event.payload.comment.body
     }
     let result: RunMigrationResult | null = null
-    if (commentBody === 'db migrate dry-run') {
+    if (commentBody === CMD_DRY_RUN) {
       result = await this.#runMigrationForDryRun(event.payload.issue, migrationMeta)
-    } else if (commentBody === 'db migrate') {
+    } else if (commentBody === CMD_APPLY) {
       result = await this.#runMigrationsForExecution(event.payload.issue, migrationMeta)
+    } else if (commentBody === CMD_DRY_RUN_JIRA) {
+      migrationMeta.ensureJiraTicket = true
+      result = await this.#runMigrationForDryRun(event.payload.issue, migrationMeta)
     }
 
     if (result?.migrationAvailable) {
-      // We can create JIRA ticket if required
-      await this.#ensureLabel(event.payload.issue.number, event.payload.issue.labels, this.#config.prLabel)
+      await this.#ensureLabels(event.payload.issue, result.jiraIssue)
     }
     return result
   }
@@ -345,7 +469,7 @@ export default class MigrationService {
 
     const errMsg = this.#validatePullRequest('pull_request' in payload ? payload.pull_request : payload.issue)
     if (errMsg) {
-      console.info(errMsg)
+      core.debug(errMsg)
       return
     }
 
@@ -370,7 +494,7 @@ export default class MigrationService {
   }
 
   async mapIssueToPullRequest(issue: gha.PullRequest): Promise<void> {
-    const { pullRequest, defaultBranchRef } = await this.#client.getPRInformation(issue.number)
+    const { pullRequest, defaultBranchRef } = await this.#ghClient.getPRInformation(issue.number)
 
     issue.base = {
       ref: pullRequest.baseRef.name,

@@ -1,12 +1,67 @@
+import JiraApi, { IssueObject } from 'jira-client'
+import * as core from '@actions/core'
+import { getInput } from '../util'
+
+type CustomFields = {
+  /**
+   * Add PR Link to JIRA Issue.
+   */
+  pr: string
+  /**
+   * PR Label used for searching. If missing "pr" field is used.
+   */
+  prLabel: string
+
+  /**
+   * Add Repo Link to JIRA Issue.
+   */
+  repo?: string
+  /**
+   * List of approvals required for PR to be merged.
+   */
+  driApprovals: string[]
+}
+
 /**
- * Github Token Permission
- *  write:repo_hook: To send webhook to GitHUB to trigger custom action
- *
- * Fields Added
- * - GitHub PR Link: API Link for PR
- * - Github Repo Link: Used for dispatching webhook
+ * Represents the configuration for JIRA integration.
  */
-import JiraApi from 'jira-client'
+export interface Config {
+  /**
+   * JIRA Host.
+   */
+  host: string
+
+  /**
+   * JIRA Project Key.
+   */
+  project: string
+
+  /**
+   * Label to add on JIRA Issue. If empty, label is ignored.
+   * It's value is derived from db migration configuration file via jiraLabel field.
+   */
+  label: string
+
+  /**
+   * JIRA Issue type. Defaults to 'Task'.
+   */
+  issueType: string
+
+  /**
+   * Custom fields for JIRA Issue.
+   */
+  fields: CustomFields
+
+  /**
+   * Status of fields.driApprovals fields
+   */
+  approvalStatus?: string
+
+  /**
+   * Status when JIRA is marked as DONE
+   */
+  doneValue: string
+}
 
 export type ClientConfig = {
   repoOwner: string
@@ -18,13 +73,13 @@ export type ClientConfig = {
   ticketLabel?: string
   issueType?: string
   // To find issue status ID, use
-  // https://{jiraDomain}.atlassian.net/rest/api/2/issue/{issueOrKey}/transitions
+  // https://{jiraDomain}/rest/api/2/issue/{issueOrKey}/transitions
   // and pick "id" value
   statusIDInitial: string
   statusIDCompleted: string
 
   // To find custom field ID, use
-  // https://{jiraDomain}.atlassian.net/secure/admin/ViewCustomFields.jspa
+  // https://{jiraDomain}/secure/admin/ViewCustomFields.jspa
   // select field and pick "id" in URL (id=12344)
   // So value should be "customfield_12345"
   customFieldPRLink: string
@@ -33,13 +88,14 @@ export type ClientConfig = {
   customFieldApprovedByDataTeam: string
 }
 
-type JiraIssue = {
+export type JiraIssue = {
   id: string
   key: string
   self: string
+  fields: IssueObject
 }
 
-type Comment = {
+export type JiraComment = {
   id: string
   self: string
   body: string
@@ -47,97 +103,61 @@ type Comment = {
 
 type CreateTicketParams = {
   prNumber: number
+  title: string
   description: string
-  assigneeName: string
+  assigneeName?: string
   prLink: string
-  repoAPIUrl: string
-}
-
-type EnsureIssueResponse = {
-  alreadyExists: boolean
-  issue: JiraIssue
+  repoLink: string
 }
 
 class Client {
-  #repoOwner: string
-  #repoName: string
   #project: string
   #ticketLabel: string
   #issueType: string
-  #statuses: {
-    initial: string
-    completed: string
-  }
-  #custom_fields: {
-    prLink: string
-    repoLink: string
-  }
+  #fields: CustomFields
   #api: JiraApi
 
-  constructor(config: ClientConfig) {
-    const {
-      repoOwner,
-      repoName,
-      apiToken,
-      apiUser,
-      jiraDomain,
-      project,
-      ticketLabel = 'db-migration',
-      issueType = 'Story',
-      statusIDInitial,
-      statusIDCompleted,
-      customFieldPRLink,
-      customFieldRepoLink,
-      customFieldApprovedByDataTeam
-    } = config
+  constructor(username: string, token: string, config: Config) {
+    const { host, project } = config
 
-    if (
-      !repoOwner ||
-      !repoName ||
-      !apiToken ||
-      !apiUser ||
-      !jiraDomain ||
-      !project ||
-      !statusIDInitial ||
-      !statusIDCompleted ||
-      !customFieldPRLink ||
-      !customFieldRepoLink ||
-      !customFieldApprovedByDataTeam
-    ) {
+    if (!username || !token || !host || !project) {
       throw new Error('Missing required arguments')
     }
 
-    this.#repoOwner = repoOwner
-    this.#repoName = repoName
     this.#project = project
-    this.#ticketLabel = ticketLabel
-    this.#issueType = issueType
-    this.#statuses = {
-      initial: statusIDInitial,
-      completed: statusIDCompleted
-    }
-    this.#custom_fields = {
-      prLink: customFieldPRLink,
-      repoLink: customFieldRepoLink
-    }
-
+    this.#ticketLabel = config.label || ''
+    this.#issueType = config.issueType || 'Task'
+    this.#fields = config.fields || {}
     this.#api = new JiraApi({
       protocol: 'https',
-      host: `${jiraDomain}.atlassian.net`,
-      username: apiUser,
-      password: apiToken,
+      host,
+      username,
+      password: token,
       apiVersion: '2',
       strictSSL: true
     })
   }
 
-  getSearchToken(prNumber: number): string {
-    return `${this.#repoOwner}/${this.#repoName}/PR#${prNumber}`
+  static fromEnv(config?: Config): Client | null {
+    if (config) {
+      return new Client(getInput('jira_username'), getInput('jira_token'), config)
+    }
+    return null
+  }
+
+  async addComment(issueId: string, message: string): Promise<JiraComment> {
+    const comment = await this.#api.addComment(issueId, message)
+    const retObj: JiraComment = {
+      id: comment.id,
+      self: comment.self,
+      body: comment.body
+    }
+    return retObj
   }
 
   async #search(searchText: string): Promise<JiraIssue | null> {
-    const jql = `project=${this.#project} AND labels=${this.#ticketLabel} AND ${searchText}`
-    console.log(`Search Text: ${jql}`)
+    const jql = `project="${this.#project}" AND ${searchText}`
+    core.debug(`Jira Search Text: [${jql}]`)
 
     const response = await this.#api.searchJira(jql, { maxResults: 2 })
     if (response.issues.length === 0) {
@@ -148,60 +168,8 @@ class Client {
     return response.issues[0]
   }
 
-  async searchIssue(prNumber: number): Promise<JiraIssue | null> {
-    return this.#search(`summary~"${this.getSearchToken(prNumber)}"`)
-  }
-
-  /**
-   * Get Jira issue by PR Link
-   * **NOTE**: Not working as unable to find custom field ID
-   * @param prLink
-   * @returns
-   */
-  async getByPRLink(prLink: string): Promise<JiraIssue | null> {
-    return await this.#search(`${this.#custom_fields.prLink} = "${prLink}"`)
-  }
-
-  async ensureIssue(createTicketParams: CreateTicketParams): Promise<EnsureIssueResponse> {
-    // const issue = await this.getByPRLink(createTicketParams.prLink)
-    const issue = await this.searchIssue(createTicketParams.prNumber)
-
-    if (issue != null) {
-      console.debug('Ticket already present', issue)
-      return {
-        alreadyExists: true,
-        issue: {
-          id: issue.id,
-          key: issue.key,
-          self: issue.self
-        }
-      }
-    }
-
-    console.debug('Creating new Ticket')
-    return {
-      alreadyExists: false,
-      issue: await this.createIssue(createTicketParams)
-    }
-  }
-
-  async addComment(issueId: string, message: string): Promise<Comment> {
-    const comment = await this.#api.addComment(issueId, message)
-    const retObj: Comment = {
-      id: comment.id,
-      self: comment.self,
-      body: comment.body
-    }
-    return retObj
-  }
-
-  async updateComment(issueId: string, commentId: string, message: string): Promise<Comment> {
-    const comment = await this.#api.updateComment(issueId, commentId, message)
-    return {
-      id: comment.id,
-      self: comment.self,
-      body: comment.body
-    }
+  async findIssue(prLink: string): Promise<JiraIssue | null> {
+    return await this.#search(`"${this.#fields.prLabel || this.#fields.pr}" = "${prLink}"`)
   }
 
   /**
@@ -211,22 +179,26 @@ class Client {
    * @returns A promise that resolves to the created Jira issue.
    */
   async createIssue(createTicketParams: CreateTicketParams): Promise<JiraIssue> {
-    const { prNumber, description, assigneeName, prLink, repoAPIUrl } = createTicketParams
-    const createJiraTicketParams = {
+    const { description, assigneeName, prLink } = createTicketParams
+    const createJiraTicketParams: IssueObject = {
       fields: {
         project: {
           key: this.#project
         },
-        summary: this.getSearchToken(prNumber),
+        summary: createTicketParams.prLink,
         issuetype: {
           name: this.#issueType
         },
         labels: [this.#ticketLabel],
         description,
-        [this.#custom_fields.prLink]: prLink,
-        [this.#custom_fields.repoLink]: repoAPIUrl
+        [this.#fields.pr]: prLink
       }
     }
+
+    if (this.#fields.repo) {
+      createJiraTicketParams.fields[this.#fields.repo] = createTicketParams.repoLink
+    }
+
     if (assigneeName) {
       createJiraTicketParams.fields.assignee = {
         name: assigneeName
@@ -237,11 +209,10 @@ class Client {
     const retObj: JiraIssue = {
       id: issue.id,
       key: issue.key,
-      self: issue.self
+      self: issue.self,
+      fields: issue.fields
     }
-    console.debug('JIRA created: ', retObj)
-
-    await this.transition(issue.id, this.#statuses.initial)
+    core.debug(`JIRA created: ${retObj.key} (id=${retObj.id})`)
 
     /*
     {
@@ -251,21 +222,6 @@ class Client {
     }
     */
     return issue as JiraIssue
-  }
-
-  /**
-   * Transitions an issue to a new state.
-   * @param issueId The ID of the issue to transition.
-   * @param transitionID The ID of the transition to perform.
-   * @returns A promise that resolves when the transition is complete.
-   */
-  async transition(issueId: string, transitionID: string): Promise<void> {
-    // This api does not return anything
-    await this.#api.transitionIssue(issueId, {
-      transition: {
-        id: transitionID
-      }
-    })
   }
 }
 

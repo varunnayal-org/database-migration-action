@@ -64,15 +64,15 @@ describe('runUsingAtlas', () => {
       'apply',
       '--dir',
       `file://${migrationConfig.dir}`,
-      '--url',
-      `${migrationConfig.databaseUrl}`,
       '--format',
       '"{{ json .Applied }}"',
       '--revisions-schema',
       migrationConfig.schema,
       '--dry-run',
       '--baseline',
-      baseline
+      baseline,
+      '--url',
+      `${migrationConfig.databaseUrl}`
     ])
   })
 
@@ -94,12 +94,12 @@ describe('runUsingAtlas', () => {
       'apply',
       '--dir',
       `file://${migrationConfig.dir}`,
-      '--url',
-      `${migrationConfig.databaseUrl}`,
       '--format',
       '"{{ json .Applied }}"',
       '--revisions-schema',
-      migrationConfig.schema
+      migrationConfig.schema,
+      '--url',
+      `${migrationConfig.databaseUrl}`
     ])
   })
 })

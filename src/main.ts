@@ -5,12 +5,14 @@ import buildConfig from './config'
 import { dataDumper } from './echo_state'
 import * as gha from './types.gha'
 import { getVaultManager } from './client/factory'
+import JiraClient from './client/jira'
 
 export async function run(): Promise<void> {
   const config = buildConfig()
   const ghClient = GHClient.fromEnv()
+  const jiraClient = JiraClient.fromEnv(config.jira)
   const secretClient = getVaultManager()
-  const migrator = new MigrationService(config, ghClient, secretClient)
+  const migrator = new MigrationService(config, ghClient, jiraClient, secretClient)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const event = github.context as any as gha.Context

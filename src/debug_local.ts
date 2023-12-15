@@ -10,6 +10,10 @@ process.env.AWS_ENDPOINT_URL = process.env.DB_MIGRATION_AWS_ENDPOINT_URL
 
 process.env.INPUT_DB_MIGRATION_ECHO_URL = process.env.DB_MIGRATION_ECHO_URL
 
+process.env.INPUT_JIRA_CONFIG = process.env.DB_MIGRATION_JIRA_CONFIG || ''
+process.env.INPUT_JIRA_USERNAME = process.env.DB_MIGRATION_JIRA_USERNAME || ''
+process.env.INPUT_JIRA_TOKEN = process.env.DB_MIGRATION_JIRA_TOKEN || ''
+
 process.env.GITHUB_RUN_ID = process.env.GITHUB_RUN_ID || ''
 process.env.GITHUB_RUN_ATTEMPT = process.env.GITHUB_RUN_ATTEMPT || '1'
 process.env.GITHUB_STEP_SUMMARY = '/tmp/step_summary.txt'

@@ -1,5 +1,9 @@
 # DB Migration Action
 
+Flow diagram: [flow.puml](./docs/diagrams/flow.puml)
+
+![./docs/diagrams/flow.puml](https://www.plantuml.com/plantuml/svg/dLRVJzim47xFNt7YQOkenCEUAiGOK0qc0LM7zeAgoeqFuYcrixFJhflslo_dn2qnBfhsLFcxxtv_EJYtJf1hLbMMsK9K21zEJc2Zf2jRm0c7W6lKRa5Oe5gZXDFJeZIgmBEpJ9lMNE6J0_CKqRA7ROqCVrRkkbbsrWnW1DDP_mE4QuMRy2hCQiKSr18uS4ZFkD1oqMLzbPxKSydv8ru6aEUN7MJpt2UHIrYfP-AWahOZQdGCVrSa8YokX-kVpiPSyJl2zwP6ZV8Ox5ON9HcjVc7FctNTTJ-UB-gQ3C-c8rps3VU_BOLCWTRk9f4zvdCOZSxYqGwVdi4LJHZcH2b2A6D7wf4KDnIq9mSeQrltb2lQpXfzwqUaZEwxJ9goq21RuorbmtSg08pXCSzVxoxFv__ZpIi-uFgfhgljGKzswZSNv_YT0NIMetw7J86MSmJ2Si4B5biW8P6XX9w3lTz_Wf512CO53mAnBRpt7KdPVdzbi-nNm3sLmawODqyvt1blQsbt1YPaY6a1PKPK76UDauJCNnI9dMuWGZofrVThonWUIYIUGbD9M28KmgA5ZGUP1pVMDWZAycS9DQ5jlH9XRZIuKZZl3maD12s2BKEgngBaYg8DSAqNZQgaptnFBwPvBIoiWX3iFErxPuA77-p08ODaw30U7dwC_Gawz89DoN1AM0l2dIdRMKfX5sjHAUdnXHU07OfmU5QJ3lwwVjkXCF7eHxwp-xt91i4PVqvlbRLAFyFLHMlM6WllPHsre2Tq0kelfAZiCQWd8FpHAEBhoeiMHVTYljV1lxF30Cr68tMg4UIxk_V80ufLImoNVZWj_8b5i-yzCQlm5p31zeEQT5YOq-4nJGKv9IhO1U6eUx5upfLmOYai-ZQA2eNsy8qk314Mxi20ZIkHRB99BYheZXc3zvW_gx2U7anp_4e28yJ-sXHy3lVHOoGLFysACd3ziSpv2paas3JE7iDcO0nRV9EVLCKOjCaWQMANg9-twUcAugc_E15nz63XIt6EMl9_Tty1)
+
 ## Features
 
 1. Ensure auditable database migrations
@@ -15,14 +19,14 @@
 
 - [ ] Schedule migrations
 - [ ] Single repository multi deployment
-- [ ] Add PR approval comment for teams mentioned in configuration
-- [ ] Closed PR?
+- [x] Add PR approval comment for teams mentioned in configuration
+- [x] Closed PR?
 - [ ] Schema changes after approval
 
 ### Action Items
 
-- [ ] JIRA integration for approval
-- [x] Do not allow drop commands (Mention in Dev SOP). Can we use linters?
+- [x] JIRA integration for approval
+- [ ] Do not allow drop commands (Mention in Dev SOP). Can we use linters?
   - Can be handled using `atlas.hcl` file with configuration
 
     ```hcl
@@ -35,6 +39,7 @@
 
 - [ ] DBA SOP
 - [ ] Dry run on actual schema replica
+  - [ ] Can we use Postgres service
 - [ ] How to kill long running migrations
 - [ ] How to capture database drifts
 - [ ] How can DBA run migrations manually instead of commands? Write an SOP for the same. How will be sync migration table?
@@ -73,10 +78,40 @@
    1. `repo:status`
    1. `public_repo`
    1. `read:org` : To read github teams
+1. JIRA Integration
+   1. Create a new Project. Eg: `SCHEMA`
+   1. If you want to automatically set `GitHub PR link` and `GitHub Repo Link` to the JIRA issue, add them and note the the field ID. This will be required when setting up JIRA configuration
+   1. Create a new JIRA API token
 1. Setup secrets
    1. Organization secrets
       1. Add `DB_MIGRATION_GITHUB_TOKEN` with value obtained by creating new github token
       1. Add `DB_MIGRATION_SECRET_STORE` secret pointing to AWS secret name
+   1. If JIRA is integrated, then add
+      1. Secrets:
+         1. `DB_MIGRATION_JIRA_USERNAME`: User using which token was created in above JIRA integration step.
+         1. `DB_MIGRATION_JIRA_TOKEN`: Token created above.
+      1. Variables
+         1. `DB_MIGRATION_JIRA_CONFIG`: JIRA configuration to be used by every org. See [JIRA Config](#jira-config).
+
+### JIRA Config
+
+`DB_MIGRATION_JIRA_CONFIG` is a JSON stringified object having following schema:
+
+```jsonc
+{
+  "host": "{domain}.atlassian.net", // JIRA host
+  "project": "SCHEMA",              // Project
+  "issueType": "Story",             // Story, Task etc. Default "Story"
+  "fields": {
+    "pr" : "customfield_11111",     // Pull Request Link field
+    "prLabel": "Label for pr field",// Label for "PR" field
+    "repo" : "customfield_22222",   // Code Repo Link field
+    "driApprovals": [],             // fields to check for DRI approvals
+  },
+  "approvalStatus": "DONE",         // Default to DONE. Value to check in "fields.driApprovals" field list
+  "doneValue": "Done"               // Defaults to Done. JIRA issue value to check before.
+}
+```
 
 ### Repository Setup
 
@@ -103,14 +138,13 @@
         name: DB Migration
         steps:
           - name: Approval check and migration run flow
-            uses: varunnayal-org/database-migration-action
-            # ## Used "run" command for local testing
-            # run: node database-migration-action/dist/index.js
+            uses: varunnayal-org/database-migration-action@v0.0.1
             with:
               repo_token: ${{ secrets.DB_MIGRATION_GITHUB_TOKEN }} # custom repo token
               aws_secret_store: ${{ secrets.DB_MIGRATION_SECRET_STORE }}
-              debug: ${{ env.DEBUG }} # defaults to false
-              # db_migration_echo_url: ${{ vars.DB_MIGRATION_ECHO_URL }}
+              jira_username: ${{ secrets.DB_MIGRATION_JIRA_USERNAME }}
+              jira_token: ${{ secrets.DB_MIGRATION_JIRA_TOKEN }}
+              jira_config: ${{ vars.DB_MIGRATION_JIRA_CONFIG }}
     ```
 
 1. Add migration config file `db.migration.json`
@@ -159,6 +193,7 @@
 
     ```json
     {
+      "serviceName": "{name of the service}",
       "approvalTeams": ["dba", "data"],
       "ownerTeams": ["go-svc-team"],
       "databases": [

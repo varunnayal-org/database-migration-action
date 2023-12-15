@@ -1,4 +1,5 @@
 import { getOctokit } from '@actions/github'
+import * as core from '@actions/core'
 import { getInput } from '../util'
 // eslint-disable-next-line import/no-unresolved
 import { OctokitOptions } from '@octokit/core/dist-types/types'
@@ -144,6 +145,7 @@ class Client {
   }
 
   async addComment(prNumber: number, message: string): Promise<IssueCreateCommentResponse> {
+    core.debug(`Adding github comment=${message}`)
     return this.#validateAPIResponse(
       'Add comment',
       await this.#client.rest.issues.createComment({
@@ -156,6 +158,7 @@ class Client {
   }
 
   async updateComment(commentId: number, message: string): Promise<IssueUpdateCommentResponse> {
+    core.debug(`Updating github comment ${commentId}\nMsg=${message}`)
     return this.#validateAPIResponse(
       'Add comment',
       await this.#client.rest.issues.updateComment({
@@ -167,14 +170,14 @@ class Client {
     )
   }
 
-  async addLabel(prNumber: number, label: string): Promise<IssueAddLabelResponse> {
+  async addLabel(prNumber: number, labels: string[]): Promise<IssueAddLabelResponse> {
     return this.#validateAPIResponse(
       'Add Label',
       await this.#client.rest.issues.addLabels({
         owner: this.#repoOwner,
         repo: this.#repoName,
         issue_number: prNumber,
-        labels: [label]
+        labels
       })
     )
   }

@@ -1,36 +1,60 @@
 import path from 'path'
 import { getInput } from './util'
+import { Config as JIRAConfig } from './client/jira'
 
+/**
+ * Represents the configuration options for the database migration action.
+ */
 export interface Config {
   /**
-   * Directory where migrations are present
+   * Name of the service.
+   */
+  serviceName: string
+
+  /**
+   * Directory where migrations are present.
    */
   baseDirectory: string
 
   /**
-   * Base branch to which merging should occur
+   * Base branch to which merging should occur.
    */
   baseBranch: string
+
   /**
-   * Label to add on PR
+   * Label to add on PR.
    */
   prLabel: string
 
   /**
-   * GitHub teams allowed to approve PR
+   * GitHub teams allowed to approve PR.
    */
   approvalTeams: string[]
+
+  /**
+   * GitHub teams that own the repository.
+   */
   ownerTeams: string[]
 
   /**
-   * Combination of approvalTeams and ownerTeams
+   * Combination of approvalTeams and ownerTeams.
    */
   allTeams: string[]
-  databases: DatabaseConfig[]
+
   /**
-   * List of secrets to fetch from AWS Secrets Manager. Generated from "databases.*.envName"
+   * Configuration options for the databases.
+   */
+  databases: DatabaseConfig[]
+
+  /**
+   * List of secrets to fetch from AWS Secrets Manager. Generated from "databases.*.envName".
    */
   dbSecretNameList: string[]
+
+  /**
+   * Configuration options for JIRA integration.
+   */
+  jira?: JIRAConfig
 }
 
 export interface DatabaseConfig {
@@ -45,6 +69,9 @@ export default function buildConfig(): Config {
   // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires, import/no-dynamic-require
   const config: Config = require(path.join(process.env.LOCAL_TESTING_REPO_DIR || process.cwd(), configFileName))
 
+  if (!config.serviceName) {
+    throw new Error('Config serviceName is not set')
+  }
   if (!Array.isArray(config.databases) || config.databases.length === 0) {
     console.log(config)
     throw new Error('No databases configured')
@@ -55,14 +82,9 @@ export default function buildConfig(): Config {
     throw new Error(`No owner team configured. Add ownerTeams in ${configFileName}`)
   }
   config.ownerTeams = [...new Set(config.ownerTeams)]
-
-  // migration.service.ts::#matchTeamWithPRApprovers assumes that this cannot be empty
-  if (!Array.isArray(config.approvalTeams) || config.approvalTeams.length === 0) {
-    throw new Error(`No approval team configured. Add approvalTeams in ${configFileName}`)
-  }
   config.approvalTeams = [...new Set(config.approvalTeams)]
 
-  config.allTeams = [...new Set([...new Set(config.approvalTeams), ...new Set(config.ownerTeams)])]
+  config.allTeams = [...new Set([...config.ownerTeams, ...config.approvalTeams])]
 
   if (!config.baseDirectory) {
     config.baseDirectory = './migrations'
@@ -89,5 +111,31 @@ export default function buildConfig(): Config {
   }, [])
   console.log(`Loaded Config from ${configFileName} `, config)
 
+  config.jira = getJiraConfig(config.serviceName)
+
   return config
+}
+
+const getJiraConfig = (jiraLabel: string): JIRAConfig | undefined => {
+  const jiraConfigString = getInput('jira_config', '')
+  if (!jiraConfigString) {
+    return undefined
+  }
+
+  const jiraConfig = JSON.parse(jiraConfigString) as JIRAConfig
+  jiraConfig.fields = jiraConfig.fields || {}
+  jiraConfig.issueType = jiraConfig.issueType || 'Task'
+  jiraConfig.label = jiraLabel
+  jiraConfig.doneValue = jiraConfig.doneValue || 'Done'
+
+  if ('driApprovals' in jiraConfig.fields) {
+    if (!jiraConfig.fields.driApprovals) {
+      jiraConfig.fields.driApprovals = []
+    } else if (typeof jiraConfig.fields.driApprovals === 'string') {
+      jiraConfig.fields.driApprovals = (jiraConfig.fields.driApprovals as string).split(',')
+      jiraConfig.approvalStatus = jiraConfig.approvalStatus || 'DONE'
+    }
+  }
+
+  return jiraConfig
 }
