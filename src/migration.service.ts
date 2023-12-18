@@ -1,19 +1,18 @@
 import * as core from '@actions/core'
-import GHClient, { IssueCreateCommentResponse, IssueUpdateCommentResponse } from './client/github'
-import JiraClient, { JiraComment, JiraIssue } from './client/jira'
+import GHClient from './client/github'
+import JiraClient, { JiraIssue } from './client/jira'
 import { Config } from './config'
 import * as gha from './types.gha'
-import { runMigrationFromList, buildMigrationConfigList, getDirectoryForDb } from './migration/migration'
-import { MigrationRunListResponse, MatchTeamWithPRApproverResult, RunMigrationResult, MigrationMeta } from './types'
+import { runMigrationFromList, buildMigrationConfigList, runLintFromList } from './migration/migration'
+import {
+  MigrationRunListResponse,
+  MatchTeamWithPRApproverResult,
+  RunMigrationResult,
+  MigrationMeta,
+  MigrationLintResponse
+} from './types'
 import { VaultClient } from './client/vault/types'
-import { TextBuilder } from './formatting/text-builder'
-
-type SetupCommentInfo = {
-  githubSummaryText: string
-  githubComment: IssueCreateCommentResponse | IssueUpdateCommentResponse
-  jiraIssue: JiraIssue | undefined
-  jiraComment?: JiraComment
-}
+import { NotifierService, NotifyResponse } from './notifier.service'
 
 const CMD_DRY_RUN = 'db migrate dry-run'
 const CMD_DRY_RUN_JIRA = 'db migrate jira'
@@ -72,7 +71,8 @@ export default class MigrationService {
       actionName: payload.action,
       source: 'pr',
       triggeredBy: payload.pull_request.user,
-      ensureJiraTicket: true
+      ensureJiraTicket: true,
+      lintRequired: true
     })
 
     if (result.migrationAvailable) {
@@ -128,99 +128,18 @@ export default class MigrationService {
     pullRequest: gha.PullRequest,
     migrationMeta: MigrationMeta,
     migrationRunListResponse: MigrationRunListResponse,
+    lintResponseList?: MigrationLintResponse,
     jiraIssue?: JiraIssue | null | undefined
-  ): Promise<SetupCommentInfo> {
-    const builder = new TextBuilder(
+  ): Promise<NotifyResponse> {
+    const notifier = new NotifierService(
       dryRun,
-      pullRequest.html_url,
-      pullRequest.base.repo.html_url,
-      this.#config.databases.map(db => getDirectoryForDb(this.#config.baseDirectory, db))
+      pullRequest,
+      migrationMeta,
+      this.#config,
+      this.#ghClient,
+      this.#jiraClient
     )
-
-    // Github
-    const githubSummaryText = builder.github(migrationRunListResponse)
-    core.summary.addRaw(githubSummaryText)
-
-    let ghCommentPromise: Promise<IssueUpdateCommentResponse | IssueCreateCommentResponse>
-    if ('commentId' in migrationMeta) {
-      ghCommentPromise = this.#ghClient.updateComment(
-        migrationMeta.commentId,
-        `${migrationMeta.commentBody}\r\n\r\n${githubSummaryText}`
-      )
-    } else {
-      ghCommentPromise = this.#ghClient.addComment(
-        pullRequest.number,
-        `Executed By: ${builder.getFormatter('github').userRef(migrationMeta.triggeredBy.login)}\r\nReason=${
-          migrationMeta.eventName
-        }.${migrationMeta.actionName}\r\n${githubSummaryText}`
-      )
-    }
-
-    // Jira
-    let jiraIssuePromise: Promise<JiraIssue | undefined> = Promise.resolve(undefined)
-    let jiraCommentPromise: Promise<JiraComment | undefined> = Promise.resolve(undefined)
-
-    const canIntegrateWithJira =
-      // if applying migration
-      dryRun === false ||
-      // else for dry run
-      // if a pr event (open, reopen, sync)
-      !!(
-        migrationMeta.ensureJiraTicket &&
-        // migration should be available
-        migrationRunListResponse.migrationAvailable &&
-        // no error message should exists
-        (!migrationRunListResponse.errMsg || jiraIssue)
-      )
-
-    core.debug(`Can create JIRA Issue or Command: ${canIntegrateWithJira ? 'Yes' : 'No'}`)
-    if (canIntegrateWithJira && this.#jiraClient) {
-      if (jiraIssue === undefined) {
-        jiraIssue = await this.#jiraClient.findIssue(pullRequest.html_url)
-      }
-      const issueComment = builder.jira(migrationRunListResponse)
-
-      // Add issue or comment
-      if (jiraIssue) {
-        jiraCommentPromise = this.#jiraClient.addComment(jiraIssue.id, issueComment)
-        jiraIssuePromise = Promise.resolve(jiraIssue)
-      } else {
-        jiraIssuePromise = this.#jiraClient.createIssue({
-          title: builder.jiraTitle(this.#config.serviceName),
-          description: builder.jiraDescription(issueComment),
-          prLink: pullRequest.html_url,
-          repoLink: pullRequest.base.repo.html_url,
-          prNumber: pullRequest.number
-        })
-      }
-    }
-
-    const response = await Promise.allSettled([
-      ghCommentPromise,
-      jiraIssuePromise,
-      jiraCommentPromise,
-      core.summary.write()
-    ])
-
-    if (response[0].status === 'rejected') {
-      core.error('GHCommentError: ', response[0].reason)
-      throw response[0].reason
-    }
-    if (response[1].status === 'rejected') {
-      core.error('JiraIssueError: ', response[1].reason)
-      throw response[1].reason
-    }
-    if (response[2].status === 'rejected') {
-      core.error('JiraCommentError: ', response[2].reason)
-      throw response[2].reason
-    }
-
-    return {
-      githubSummaryText,
-      githubComment: response[0].value,
-      jiraIssue: response[1].value,
-      jiraComment: response[2].value
-    }
+    return await notifier.notify(migrationRunListResponse, lintResponseList, jiraIssue)
   }
 
   /**
@@ -303,7 +222,7 @@ export default class MigrationService {
 
     const [migrationConfigList, jiraIssue] = await Promise.all([
       // Build configuration
-      buildMigrationConfigList(this.#config.baseDirectory, this.#config.databases, secretMap),
+      buildMigrationConfigList(this.#config.baseDirectory, this.#config.databases, secretMap, this.#config.devDBUrl),
       // Fetch JIRA Issue
       this.#jiraClient?.findIssue(pullRequest.html_url) ?? Promise.resolve(undefined)
     ])
@@ -376,8 +295,15 @@ export default class MigrationService {
     const migrationConfigList = await buildMigrationConfigList(
       this.#config.baseDirectory,
       this.#config.databases,
-      await this.secretClient.getSecrets(this.#config.dbSecretNameList)
+      await this.secretClient.getSecrets(this.#config.dbSecretNameList),
+      this.#config.devDBUrl
     )
+
+    let lintResponseList: MigrationLintResponse | undefined
+    if (migrationMeta.lintRequired) {
+      lintResponseList = await runLintFromList(migrationConfigList)
+    }
+
     const migrationRunListResponse = await runMigrationFromList(migrationConfigList, true)
 
     if (
@@ -392,7 +318,13 @@ export default class MigrationService {
       }
     }
 
-    const { jiraIssue } = await this.#buildCommentInfo(true, pr, migrationMeta, migrationRunListResponse)
+    const { jiraIssue } = await this.#buildCommentInfo(
+      true,
+      pr,
+      migrationMeta,
+      migrationRunListResponse,
+      lintResponseList
+    )
 
     return {
       executionResponseList: migrationRunListResponse.executionResponseList,

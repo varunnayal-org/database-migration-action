@@ -1,6 +1,40 @@
 import * as util from '../util'
-import { AtlasMigrationExecutionResponse } from './atlas-class'
+import { AtlasLintResponse, AtlasMigrationExecutionResponse } from './atlas-class'
 import { MigrationConfig, MigrationExecutionResponse } from '../types'
+
+// Atlas HCL file for linting (https://atlasgo.io/lint/analyzers)
+// TODO: Use this HCL File
+const atlasHCL = `lint {
+  destructive {
+    error = true
+  }
+  incompatible {
+    error = true
+  }
+  concurrent_index {
+    error = true
+  }
+}`
+
+async function lint(migrationConfig: MigrationConfig): Promise<AtlasLintResponse> {
+  const atlasHCLFile = '' // await util.writeTempFile(atlasHCL)
+  const lintArgs = [
+    'migrate',
+    'lint',
+    '--dir',
+    `file://${migrationConfig.dir}`,
+    '-c',
+    `file://${atlasHCLFile}`,
+    '--format',
+    '--latest',
+    '100000', // TODO: Get from PR files
+    '"{{ json .Files }}"',
+    '--dev-url',
+    migrationConfig.devUrl
+  ]
+  const response = await util.exec('atlas', lintArgs)
+  return AtlasLintResponse.build(response)
+}
 
 async function run(migrationConfig: MigrationConfig): Promise<MigrationExecutionResponse> {
   const dirInput = `file://${migrationConfig.dir}`
@@ -31,14 +65,15 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
 
   try {
     const response = await util.exec('atlas', migrateApplyArgs)
-    return AtlasMigrationExecutionResponse.fromResponse(response)
+    return AtlasMigrationExecutionResponse.build(response)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (ex: any) {
+    // Happens when some migrations were applied, but last one has failed
     if (ex.message.startsWith('[')) {
-      return AtlasMigrationExecutionResponse.fromResponse(ex.message)
+      return AtlasMigrationExecutionResponse.build(ex.message)
     }
     throw ex
   }
 }
 
-export { run }
+export { run, lint }

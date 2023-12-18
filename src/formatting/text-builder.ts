@@ -1,4 +1,4 @@
-import { Formatter, MigrationRunListResponse } from '../types'
+import { Formatter, LintExecutionResponse, MigrationRunListResponse } from '../types'
 import { readableDate } from '../util'
 import { Platform, formatterMap } from './formatters'
 
@@ -37,9 +37,9 @@ export class TextBuilder {
             // if a statement has errored out, that will be captured in applied statement. Hence remove it
             successfullyExecutedStatementList.length,
             // error
-            versionErr?.getError() ? `${versionErr.getError()}` : '-',
+            fmt.cEsc(versionErr?.getMessage() ? `${versionErr.getMessage()}` : '-'),
             // error statement
-            versionErr?.getStatement() ? `${versionErr.getStatement()}` : '-'
+            fmt.cEsc(versionErr?.getStatement() ? `${versionErr.getStatement()}` : '-')
           ].join(fmt.rSep)
 
           sqlStatementString += `\n-- File: ${version.getName()}\n${successfullyExecutedStatementList.join('\n')}\n`
@@ -117,6 +117,47 @@ export class TextBuilder {
 
   github(response: MigrationRunListResponse): string {
     return this.#build(response, formatterMap.github)
+  }
+
+  #buildLintMessage(lintResults: LintExecutionResponse[], fmt: Formatter): string {
+    const lintMessage = lintResults.reduce<string>(
+      (tableRows, lintResult) => {
+        // No error, no need to show
+        if (!lintResult.getFirstError()) {
+          return tableRows
+        }
+
+        const rowString: string[] = []
+        for (const fileLintResult of lintResult.getFileLintResults()) {
+          for (const lintError of fileLintResult.getDiagnostics()) {
+            const rowData = [
+              // filename
+              fileLintResult.getName(),
+              // error
+              fmt.cEsc(lintError.getMessage()),
+              // error code
+              fmt.linkBuilder(lintError.getErrorCode(), lintError.getHelpUrl()),
+              // position
+              lintError.getPosition()
+            ]
+
+            rowString.push(`${fmt.rSep}${rowData.join(fmt.rSep)}${fmt.rSep}`)
+          }
+        }
+
+        return `${tableRows}\n${rowString.join('\n')}\n`
+      },
+      fmt.headerBuilder(['File', 'Error', 'Error Code', 'Position'])
+    )
+    return `**Lint Errors**\n${lintMessage}\n`
+  }
+
+  githubLint(lintResults: LintExecutionResponse[]): string {
+    return this.#buildLintMessage(lintResults, formatterMap.github)
+  }
+
+  jiraLint(lintResults: LintExecutionResponse[]): string {
+    return this.#buildLintMessage(lintResults, formatterMap.jira)
   }
 
   getFormatter(name: Platform): Formatter {

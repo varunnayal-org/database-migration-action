@@ -1,6 +1,11 @@
 import { JiraIssue } from './client/jira'
 import { User } from './types.gha'
 
+export interface MigrationLintResponse {
+  lintResponseList: LintExecutionResponse[]
+  errMsg?: string
+}
+
 export interface MigrationRunListResponse {
   migrationAvailable: boolean
   executionResponseList: MigrationExecutionResponse[]
@@ -13,6 +18,7 @@ export interface MigrationConfig {
   baseline?: string
   schema: string
   dryRun: boolean
+  devUrl: string
 }
 
 export interface MatchTeamWithPRApproverResult {
@@ -34,6 +40,7 @@ export type MigrationMeta = {
   triggeredBy: User
   // Set this to true only when PR event is received(i.e PR (re)opened, synchronized)
   ensureJiraTicket?: boolean
+  lintRequired?: boolean
   skipCommentWhenNoMigrationsAvailable?: boolean
 } & (
   | {
@@ -63,7 +70,7 @@ export interface VersionExecutionError {
    * Gets the error message associated with the execution error.
    * @returns The error message.
    */
-  getError(): string
+  getMessage(): string
 }
 
 /**
@@ -145,6 +152,10 @@ export interface Formatter {
   hSep: string
   rSep: string
   /**
+   * Code block within table column allowed
+   */
+  tableCodeBlockAllowed: boolean
+  /**
    * Table column value escape
    * @param value
    * @returns
@@ -155,4 +166,43 @@ export interface Formatter {
   linkBuilder: (text: string, url: string) => string
   quoteBuilder: (text: string) => string
   sqlStatementBuilder: (text: string, header?: string) => string
+}
+
+/**
+ * Represents a lint diagnostic error.
+ */
+export interface LintDiagnosticError {
+  /**
+   * Gets the error message.
+   * @returns The error message.
+   */
+  getMessage(): string
+
+  /**
+   * Gets the error code.
+   * @returns The error code.
+   */
+  getErrorCode(): string
+
+  getPosition(): number
+
+  /**
+   * Gets the help URL.
+   * @returns The help URL.
+   */
+  getHelpUrl(): string
+}
+
+export interface LintFileResult {
+  getName(): string
+  getDiagnostics(): LintDiagnosticError[]
+}
+
+/**
+ * Represents the response of a lint execution.
+ */
+export interface LintExecutionResponse {
+  getFileLintResults(): LintFileResult[]
+
+  getFirstError(): string | undefined
 }

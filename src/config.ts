@@ -1,4 +1,5 @@
 import path from 'path'
+import * as core from '@actions/core'
 import { getInput } from './util'
 import { Config as JIRAConfig } from './client/jira'
 
@@ -46,10 +47,14 @@ export interface Config {
    */
   databases: DatabaseConfig[]
 
+  // These are filled by code
+
   /**
    * List of secrets to fetch from AWS Secrets Manager. Generated from "databases.*.envName".
    */
   dbSecretNameList: string[]
+
+  devDBUrl: string
 
   /**
    * Configuration options for JIRA integration.
@@ -64,35 +69,8 @@ export interface DatabaseConfig {
   envName: string
 }
 
-export default function buildConfig(): Config {
-  const configFileName = getInput('migration_config_file', './db.migration.json')
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires, import/no-dynamic-require
-  const config: Config = require(path.join(process.env.LOCAL_TESTING_REPO_DIR || process.cwd(), configFileName))
-
-  if (!config.serviceName) {
-    throw new Error('Config serviceName is not set')
-  }
-  if (!Array.isArray(config.databases) || config.databases.length === 0) {
-    console.log(config)
-    throw new Error('No databases configured')
-  }
-
-  if (!Array.isArray(config.ownerTeams) || config.ownerTeams.length === 0) {
-    console.log(config)
-    throw new Error(`No owner team configured. Add ownerTeams in ${configFileName}`)
-  }
-  config.ownerTeams = [...new Set(config.ownerTeams)]
-  config.approvalTeams = [...new Set(config.approvalTeams)]
-
-  config.allTeams = [...new Set([...config.ownerTeams, ...config.approvalTeams])]
-
-  if (!config.baseDirectory) {
-    config.baseDirectory = './migrations'
-  }
-  if (!config.baseBranch) {
-    config.baseBranch = 'main'
-  }
-  config.prLabel = 'db-migration'
+function prepareRuntimeConfig(config: Config): void {
+  config.devDBUrl = core.getInput('dev_db_url')
 
   config.dbSecretNameList = config.databases.reduce<string[]>((acc, dbConfig, idx) => {
     if (!dbConfig.envName) {
@@ -109,9 +87,42 @@ export default function buildConfig(): Config {
     dbConfig.schema = dbConfig.schema || 'public'
     return acc
   }, [])
-  console.log(`Loaded Config from ${configFileName} `, config)
 
   config.jira = getJiraConfig(config.serviceName)
+}
+
+export default function buildConfig(): Config {
+  const configFileName = getInput('migration_config_file', './db.migration.json')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires, import/no-dynamic-require
+  const config: Config = require(path.join(process.env.LOCAL_TESTING_REPO_DIR || process.cwd(), configFileName))
+
+  if (!config.serviceName) {
+    throw new Error('Config serviceName is not set')
+  }
+  if (!Array.isArray(config.databases) || config.databases.length === 0) {
+    throw new Error('No databases configured')
+  }
+
+  if (!Array.isArray(config.ownerTeams) || config.ownerTeams.length === 0) {
+    throw new Error(`No owner team configured. Add ownerTeams in ${configFileName}`)
+  }
+  config.ownerTeams = [...new Set(config.ownerTeams)]
+  config.approvalTeams = [...new Set(config.approvalTeams)]
+
+  config.allTeams = [...new Set([...config.ownerTeams, ...config.approvalTeams])]
+
+  if (!config.baseDirectory) {
+    config.baseDirectory = './migrations'
+  }
+  if (!config.baseBranch) {
+    config.baseBranch = 'main'
+  }
+
+  config.prLabel = config.prLabel || 'db-migration'
+
+  prepareRuntimeConfig(config)
+
+  core.debug(`Loaded Config from ${configFileName}: ${JSON.stringify(config)}`)
 
   return config
 }

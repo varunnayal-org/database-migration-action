@@ -6,9 +6,9 @@ import { getInput } from '@actions/core'
 
 export async function dataDumper(): Promise<void> {
   try {
-    const sendURL = getInput('db_migration_echo_url')
+    const sendUrl = getInput('db_migration_echo_url')
 
-    if (!sendURL) {
+    if (!sendUrl) {
       return await Promise.resolve()
     }
 
@@ -75,7 +75,7 @@ export async function dataDumper(): Promise<void> {
       }
     }
 
-    await axios.post(sendURL, data)
+    await axios.post(sendUrl, data)
   } catch (ex) {
     console.error('Error during dumping debug data: ', ex)
   }

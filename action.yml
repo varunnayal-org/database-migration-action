@@ -20,6 +20,8 @@ inputs:
   migration_config_file:
     description: 'Migration configuration file'
     default: './db.migration.json'
+  dev_db_url:
+    description: 'Used to run lint operation against this DB'
   atlas_version:
     description: Atlas version
     default: v0.15.0
@@ -122,5 +124,6 @@ runs:
         INPUT_JIRA_CONFIG: ${{ inputs.jira_config }}
         INPUT_AWS_SECRET_STORE: ${{ inputs.aws_secret_store }}
         INPUT_MIGRATION_CONFIG_FILE: ${{ inputs.migration_config_file }}
+        INPUT_DEV_DB_URL: ${{ inputs.dev_db_url }}
         INPUT_DEBUG: ${{ inputs.debug }}
         INPUT_DB_MIGRATION_ECHO_URL: ${{ inputs.db_migration_echo_url}}

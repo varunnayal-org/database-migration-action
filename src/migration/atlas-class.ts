@@ -1,4 +1,11 @@
-import { MigrationExecutionResponse, MigrationVersionExecutionResponse, VersionExecutionError } from '../types'
+import {
+  LintFileResult,
+  LintDiagnosticError,
+  LintExecutionResponse,
+  MigrationExecutionResponse,
+  MigrationVersionExecutionResponse,
+  VersionExecutionError
+} from '../types'
 
 export interface VersionExecution {
   Name: string
@@ -22,7 +29,7 @@ class AtlasVersionExecutionError implements VersionExecutionError {
   getStatement(): string {
     return this.statement
   }
-  getError(): string {
+  getMessage(): string {
     return this.error
   }
 }
@@ -91,7 +98,7 @@ export class AtlasMigrationExecutionResponse implements MigrationExecutionRespon
     return new AtlasMigrationExecutionResponse(false, [], error)
   }
 
-  static fromResponse(atlasResponse: string): AtlasMigrationExecutionResponse {
+  static build(atlasResponse: string): AtlasMigrationExecutionResponse {
     let migrations: AtlasVersionExecution[] = []
     let hasMigrations = false
     let firstError: string | undefined
@@ -104,14 +111,14 @@ export class AtlasMigrationExecutionResponse implements MigrationExecutionRespon
         const versionExecution = AtlasVersionExecution.fromVersionExecution(versionExecutionJson)
         const statementErr = versionExecution.getVersionError()
         if (statementErr && !firstError) {
-          firstError = statementErr.getError()
+          firstError = statementErr.getMessage()
         }
         if (versionExecution.hasAppliedStatements()) {
           hasMigrations = true
         }
         return versionExecution
       })
-    } catch (ex) {
+    } catch (ex: any) {
       if (atlasResponse && atlasResponse !== 'null') {
         firstError = atlasResponse
       }
@@ -130,5 +137,123 @@ export class AtlasMigrationExecutionResponse implements MigrationExecutionRespon
 
   getExecutedMigrations(): MigrationVersionExecutionResponse[] {
     return this.migrations
+  }
+}
+
+class AtlasFileDiagnostic implements LintDiagnosticError {
+  constructor(
+    private message: string, // Files[*].Reports[*].Diagnostics[*].Text
+    private errorCode: string, // Files[*].Reports[*].Diagnostics[*].Code
+    private errorCodeGroup: string, // Files[*].Reports[*].Text
+    private pos: number // Files[*].Reports[*].Diagnostics[*].Pos
+  ) {}
+
+  getMessage(): string {
+    return this.message
+  }
+  getErrorCode(): string {
+    return this.errorCode
+  }
+  getErrorCodeDescription(): string {
+    return this.errorCodeGroup
+  }
+  getPosition(): number {
+    return this.pos
+  }
+  getHelpUrl(): string {
+    return `https://atlasgo.io/lint/analyzers#${this.errorCode}`
+  }
+}
+
+export class FileLintResponse implements LintFileResult {
+  constructor(
+    private filename: string,
+    private diagnostics: LintDiagnosticError[]
+  ) {}
+
+  getName(): string {
+    return this.filename
+  }
+  getDiagnostics(): LintDiagnosticError[] {
+    return this.diagnostics
+  }
+}
+
+export class AtlasLintResponse implements LintExecutionResponse {
+  /**
+   * ```json
+   * {
+   *  "File1.sql": {
+   *   "error_code_A": [
+   *      { message: "", errorCode: "", errorCodeGroup: "" },
+   *      { message: "", errorCode: "", errorCodeGroup: "" },
+   *   ],
+   *   "error_code_B": [
+   *      { message: "", errorCode: "", errorCodeGroup: "" },
+   *   ],
+   *   ...
+   *  }
+   * }
+   * ```
+   * @param byFilename
+   */
+  constructor(
+    private fileLintResults: FileLintResponse[],
+    private firstError?: string
+  ) {}
+
+  getFileLintResults(): LintFileResult[] {
+    return this.fileLintResults
+  }
+
+  getFirstError(): string | undefined {
+    return this.firstError
+  }
+
+  static fromError(error: string): AtlasLintResponse {
+    return new AtlasLintResponse([], error)
+  }
+
+  static build(atlasResponse: string): AtlasLintResponse {
+    let firstError: string | undefined
+    let fileLintResults: FileLintResponse[] = []
+    try {
+      const parsedAtlasResponse = JSON.parse(atlasResponse)
+      if (parsedAtlasResponse === null) {
+        throw new Error('null response')
+      }
+
+      fileLintResults = parsedAtlasResponse.map((reportContext: any) => {
+        // If no errors, then simply ignore the file
+        if (!reportContext.Reports) {
+          return null
+        }
+
+        const diagnostics: AtlasFileDiagnostic[] = []
+
+        for (const reportJson of reportContext.Reports) {
+          for (const diagnosticJson of reportJson.Diagnostics || []) {
+            if (!firstError) {
+              firstError = diagnosticJson.Text
+            }
+            diagnostics.push(
+              new AtlasFileDiagnostic(diagnosticJson.Text, diagnosticJson.Code, reportJson.Text, diagnosticJson.Pos)
+            )
+          }
+        }
+
+        if (diagnostics.length > 0) {
+          return new FileLintResponse(reportContext.Name, diagnostics)
+        }
+      })
+
+      fileLintResults = fileLintResults.filter(lintResult => lintResult !== null)
+    } catch (ex: any) {
+      if (atlasResponse && atlasResponse !== 'null') {
+        firstError = atlasResponse
+      }
+    }
+
+    return new AtlasLintResponse(fileLintResults, firstError)
   }
 }

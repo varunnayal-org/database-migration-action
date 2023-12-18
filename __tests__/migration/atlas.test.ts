@@ -4,16 +4,22 @@ import * as util from '../../src/util'
 import * as migration from '../../src/migration/migration'
 import * as atlas from '../../src/migration/atlas'
 import { MigrationConfig } from '../../src/types'
-import { VersionExecution } from '../../src/migration/atlas-class'
+import { AtlasMigrationExecutionResponse, VersionExecution } from '../../src/migration/atlas-class'
 
 let utilExec: jest.SpyInstance
 
-const getExpectedMigrationConfigList = (dir = '.', dbUrlKey = 'test', schema = 'public'): MigrationConfig => ({
+const getExpectedMigrationConfigList = (
+  dir = '.',
+  dbUrlKey = 'test',
+  schema = 'public',
+  devUrl = 'test'
+): MigrationConfig => ({
   dir: path.join(migration.TEMP_DIR_FOR_MIGRATION, dir),
   databaseUrl: dbUrlKey,
   schema,
   baseline: '',
-  dryRun: true
+  dryRun: true,
+  devUrl
 })
 function getBaseExecutionList(): VersionExecution[] {
   return [
@@ -53,6 +59,7 @@ describe('runUsingAtlas', () => {
 
     await atlas.run(migrationConfig)
 
+    expect(utilExecFn).toHaveBeenCalledTimes(2)
     expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
       'migrate',
       'hash',
@@ -83,6 +90,7 @@ describe('runUsingAtlas', () => {
 
     await atlas.run(migrationConfig)
 
+    expect(utilExecFn).toHaveBeenCalledTimes(2)
     expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
       'migrate',
       'hash',
@@ -100,6 +108,73 @@ describe('runUsingAtlas', () => {
       migrationConfig.schema,
       '--url',
       `${migrationConfig.databaseUrl}`
+    ])
+  })
+
+  it('should return response when errored out with json list', async () => {
+    const migrationConfig = getExpectedMigrationConfigList()
+    const errMsg = JSON.stringify(getBaseExecutionList())
+
+    let utilExecRunCount = 0
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const utilExecFn = utilExec.mockImplementation(async (cmd: string, args: string[]) => {
+      if (utilExecRunCount++ === 0) {
+        return `${cmd} ${args.join(' ')}`
+      }
+      return Promise.reject(new Error(errMsg))
+    })
+
+    const response = await atlas.run(migrationConfig)
+    expect(response).toEqual(AtlasMigrationExecutionResponse.build(errMsg))
+
+    expect(utilExecFn).toHaveBeenCalledTimes(2)
+    expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
+      'migrate',
+      'hash',
+      '--dir',
+      `file://${migrationConfig.dir}`
+    ])
+
+    expect(utilExecFn).toHaveBeenNthCalledWith(2, 'atlas', [
+      'migrate',
+      'apply',
+      '--dir',
+      `file://${migrationConfig.dir}`,
+      '--format',
+      '"{{ json .Applied }}"',
+      '--revisions-schema',
+      migrationConfig.schema,
+      '--dry-run',
+      '--url',
+      `${migrationConfig.databaseUrl}`
+    ])
+  })
+
+  it('should throw on unexpected response', async () => {
+    const migrationConfig = getExpectedMigrationConfigList()
+    const errMsg = 'Some unwanted error'
+
+    let utilExecRunCount = 0
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const utilExecFn = utilExec.mockImplementation(async (cmd: string, args: string[]) => {
+      utilExecRunCount++
+      console.log(cmd, args)
+      if (utilExecRunCount === 1) {
+        return `${cmd} ${args.join(' ')}`
+      }
+      return Promise.reject(new Error(errMsg))
+    })
+
+    expect(atlas.run(migrationConfig)).rejects.toThrow(errMsg)
+
+    expect(utilExecFn).toHaveBeenCalledTimes(1)
+    expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
+      'migrate',
+      'hash',
+      '--dir',
+      `file://${migrationConfig.dir}`
     ])
   })
 })

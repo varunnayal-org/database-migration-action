@@ -22,15 +22,24 @@ const getMockDirectories = (): Record<string, any> => ({
   },
   multi_db_dir: {
     db1: {
+      'atlas.hcl': 'lint { }',
       'readme_db1.md': '# Readme',
       '00000000000005_create_test5_table.sql': 'create table test5(id int);',
       '00000000000006_create_test6_table.sql': 'create table test6(id int);'
     },
     db2: {
+      'atlas.hcl': 'lint { }',
       'readme_db2.md': '# Readme',
       '00000000000007_create_test7_table.sql': 'create table tes7(id int);',
       '00000000000008_create_test8_table.sql': 'create table test8(id int);',
       '00000000000009_create_test9_table.sql': 'create table test9(id int);'
+    },
+    db3: {
+      'atlas.hcl': 'lint { }',
+      'readme_db3.md': '# Readme',
+      '00000000000010_create_test10_table.sql': 'create table tes10(id int);',
+      '00000000000011_create_test11_table.sql': 'create table test11(id int);',
+      '00000000000012_create_test12_table.sql': 'create table test12(id int);'
     }
   }
 })
@@ -64,15 +73,22 @@ const getDB = (directory = '.', envName = 'test', schema = 'public'): DatabaseCo
   envName,
   schema
 })
+
 const getVaultKeyStore = (...names: string[]): SecretMap =>
   names.length === 0 ? { test: 'test' } : names.reduce((acc, name) => ({ ...acc, [name]: name }), {})
-const getExpectedMigrationConfigList = (dir = '.', databaseUrl = 'test', schema = 'public'): MigrationConfig[] => [
+const getExpectedMigrationConfigList = (
+  dir = '.',
+  databaseUrl = 'test',
+  schema = 'public',
+  devUrl = 'test'
+): MigrationConfig[] => [
   {
     dir: path.join(migration.TEMP_DIR_FOR_MIGRATION, dir),
     databaseUrl,
     schema,
     baseline: undefined,
-    dryRun: true
+    dryRun: true,
+    devUrl
   }
 ]
 
@@ -85,6 +101,7 @@ class MyError extends Error {
 }
 
 describe('buildMigrationConfigList', () => {
+  const devDBUrl = 'test'
   beforeEach(() => {
     jest.clearAllMocks()
     mock.restore()
@@ -97,13 +114,13 @@ describe('buildMigrationConfigList', () => {
 
   describe('single_database', () => {
     it('should return migration config list', async () => {
-      expect(await migration.buildMigrationConfigList('migrations', [getDB()], getVaultKeyStore())).toEqual(
+      expect(await migration.buildMigrationConfigList('migrations', [getDB()], getVaultKeyStore(), devDBUrl)).toEqual(
         getExpectedMigrationConfigList()
       )
     })
 
     it('should ignore non sql files', async () => {
-      expect(await migration.buildMigrationConfigList('migrations', [getDB()], getVaultKeyStore())).toEqual(
+      expect(await migration.buildMigrationConfigList('migrations', [getDB()], getVaultKeyStore(), devDBUrl)).toEqual(
         getExpectedMigrationConfigList()
       )
 
@@ -115,7 +132,7 @@ describe('buildMigrationConfigList', () => {
 
     it('should throw error if secret not found', async () => {
       await expect(
-        migration.buildMigrationConfigList('migrations', [getDB()], getVaultKeyStore('test1'))
+        migration.buildMigrationConfigList('migrations', [getDB()], getVaultKeyStore('test1'), devDBUrl)
       ).rejects.toThrow('Secret test not found')
     })
 
@@ -148,13 +165,13 @@ describe('buildMigrationConfigList', () => {
     })
 
     it('should return migration config list', async () => {
-      expect(await migration.buildMigrationConfigList('multi_db_dir', dbs, vaultKeyStore)).toEqual(
+      expect(await migration.buildMigrationConfigList('multi_db_dir', dbs, vaultKeyStore, devDBUrl)).toEqual(
         expectedMigrationConfigList
       )
     })
 
     it('should ignore non sql files', async () => {
-      expect(await migration.buildMigrationConfigList('multi_db_dir', dbs, vaultKeyStore)).toEqual(
+      expect(await migration.buildMigrationConfigList('multi_db_dir', dbs, vaultKeyStore, devDBUrl)).toEqual(
         expectedMigrationConfigList
       )
 
@@ -172,10 +189,15 @@ describe('buildMigrationConfigList', () => {
 
     it('should throw error if secret not found', async () => {
       await expect(
-        migration.buildMigrationConfigList('multi_db_dir', dbs, {
-          ...vaultKeyStore,
-          db2_key: ''
-        })
+        migration.buildMigrationConfigList(
+          'multi_db_dir',
+          dbs,
+          {
+            ...vaultKeyStore,
+            db2_key: ''
+          },
+          devDBUrl
+        )
       ).rejects.toThrow('Secret db2_key not found')
     })
 
@@ -190,9 +212,9 @@ describe('buildMigrationConfigList', () => {
 describe('runMigrationFromList', () => {
   const getAtlasSuccessfulRunResponseString = (): string => JSON.stringify(getBaseExecutionList())
   const getAtlasSuccessfulRunResponse = (): AtlasMigrationExecutionResponse =>
-    AtlasMigrationExecutionResponse.fromResponse(getAtlasSuccessfulRunResponseString())
-  const getAtlasRunResponseForNull = AtlasMigrationExecutionResponse.fromResponse('null')
-  const getAtlasRunResponseForEmptyString = AtlasMigrationExecutionResponse.fromResponse('')
+    AtlasMigrationExecutionResponse.build(getAtlasSuccessfulRunResponseString())
+  const getAtlasRunResponseForNull = AtlasMigrationExecutionResponse.build('null')
+  const getAtlasRunResponseForEmptyString = AtlasMigrationExecutionResponse.build('')
 
   function getBaseExecutionListForDB2(): VersionExecution[] {
     return [
@@ -214,6 +236,30 @@ describe('runMigrationFromList', () => {
         Start: '2023-12-11T10:55:19.470647+05:30',
         End: '2023-12-11T10:55:19.470648+05:30',
         Applied: ['ALTER TABLE "session" ADD COLUMN "email" varchar(255);']
+      }
+    ]
+  }
+
+  function getBaseExecutionListForDB3(): VersionExecution[] {
+    return [
+      {
+        Name: '20231222010101_add_users.sql',
+        Version: '20231222010101',
+        Description: 'add_users',
+        Start: '2023-12-11T10:55:19.468908+05:30',
+        End: '2023-12-11T10:55:19.470647+05:30',
+        Applied: [
+          'CREATE TABLE users (id uuid NOT NULL, PRIMARY KEY ("id"));',
+          'ALTER TABLE "users" ADD COLUMN "phone" varchar(13);'
+        ]
+      },
+      {
+        Name: '20231223000000_add_column.sql',
+        Version: '20231223000000',
+        Description: 'add_column',
+        Start: '2023-12-11T10:55:19.470647+05:30',
+        End: '2023-12-11T10:55:19.470648+05:30',
+        Applied: ['ALTER TABLE "users" ADD COLUMN "old_phone" varchar(13);']
       }
     ]
   }
@@ -271,11 +317,13 @@ describe('runMigrationFromList', () => {
     beforeEach(async () => {
       expectedMigrationConfigList = [
         ...getExpectedMigrationConfigList('db1', 'db1_credentials'),
-        ...getExpectedMigrationConfigList('db2', 'db2_credentials')
+        ...getExpectedMigrationConfigList('db2', 'db2_credentials'),
+        ...getExpectedMigrationConfigList('db3', 'db3_credentials')
       ]
       migrationConfigList = [
         ...getExpectedMigrationConfigList('db1', 'db1_credentials'),
-        ...getExpectedMigrationConfigList('db2', 'db2_credentials')
+        ...getExpectedMigrationConfigList('db2', 'db2_credentials'),
+        ...getExpectedMigrationConfigList('db3', 'db3_credentials')
       ]
     })
 
@@ -287,30 +335,37 @@ describe('runMigrationFromList', () => {
 
       const expectedResponse: MigrationRunListResponse = {
         migrationAvailable: false,
-        executionResponseList: [getAtlasRunResponseForNull, getAtlasRunResponseForEmptyString]
+        executionResponseList: [
+          getAtlasRunResponseForNull,
+          getAtlasRunResponseForEmptyString,
+          getAtlasRunResponseForEmptyString
+        ]
       }
+
       expect(response).toEqual(expectedResponse)
 
-      expect(atlasRunFn).toHaveBeenCalledTimes(2)
-      expect(atlasRunFn).toHaveBeenNthCalledWith(1, {
-        ...expectedMigrationConfigList[0],
-        dryRun
-      })
-      expect(atlasRunFn).toHaveBeenNthCalledWith(2, {
-        ...expectedMigrationConfigList[1],
-        dryRun
-      })
+      expect(atlasRunFn).toHaveBeenCalledTimes(expectedMigrationConfigList.length)
+      for (const migrationConfig of expectedMigrationConfigList) {
+        expect(atlasRunFn).toHaveBeenCalledWith({
+          ...migrationConfig,
+          dryRun
+        })
+      }
     })
 
     it('should return response', async () => {
       const dryRun = true
-      let calledNum = 0
+      let atlasRunFnCallCount = 0
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const atlasRunFn = atlasRun.mockImplementation(async (migrationConfig: MigrationConfig) => {
-        if (calledNum++ === 0) {
+        ++atlasRunFnCallCount
+        if (atlasRunFnCallCount === 1) {
           return getAtlasSuccessfulRunResponse()
+        } else if (atlasRunFnCallCount === 2) {
+          return AtlasMigrationExecutionResponse.build(JSON.stringify(getBaseExecutionListForDB2()))
+        } else if (atlasRunFnCallCount === 3) {
+          return AtlasMigrationExecutionResponse.build(JSON.stringify(getBaseExecutionListForDB3()))
         }
-        return AtlasMigrationExecutionResponse.fromResponse(JSON.stringify(getBaseExecutionListForDB2()))
       })
 
       const response = await migration.runMigrationFromList(migrationConfigList, dryRun)
@@ -319,20 +374,21 @@ describe('runMigrationFromList', () => {
         migrationAvailable: true,
         executionResponseList: [
           getAtlasSuccessfulRunResponse(),
-          AtlasMigrationExecutionResponse.fromResponse(JSON.stringify(getBaseExecutionListForDB2()))
+          AtlasMigrationExecutionResponse.build(JSON.stringify(getBaseExecutionListForDB2())),
+          AtlasMigrationExecutionResponse.build(JSON.stringify(getBaseExecutionListForDB3()))
         ]
       }
+      // console.log(response)
+      // console.log(expectedResponse)
       expect(response).toEqual(expectedResponse)
 
-      expect(atlasRunFn).toHaveBeenCalledTimes(2)
-      expect(atlasRunFn).toHaveBeenNthCalledWith(1, {
-        ...expectedMigrationConfigList[0],
-        dryRun
-      })
-      expect(atlasRunFn).toHaveBeenNthCalledWith(2, {
-        ...expectedMigrationConfigList[1],
-        dryRun
-      })
+      expect(atlasRunFn).toHaveBeenCalledTimes(expectedMigrationConfigList.length)
+      for (const migrationConfig of expectedMigrationConfigList) {
+        expect(atlasRunFn).toHaveBeenCalledWith({
+          ...migrationConfig,
+          dryRun
+        })
+      }
     })
 
     it('should return response if migration not available for some dbs', async () => {
@@ -351,19 +407,21 @@ describe('runMigrationFromList', () => {
 
       const expectedResponse: MigrationRunListResponse = {
         migrationAvailable: true,
-        executionResponseList: [getAtlasRunResponseForEmptyString, getAtlasSuccessfulRunResponse()]
+        executionResponseList: [
+          getAtlasRunResponseForEmptyString,
+          getAtlasSuccessfulRunResponse(),
+          getAtlasRunResponseForEmptyString
+        ]
       }
       expect(response).toEqual(expectedResponse)
 
-      expect(atlasRunFn).toHaveBeenCalledTimes(2)
-      expect(atlasRunFn).toHaveBeenNthCalledWith(1, {
-        ...expectedMigrationConfigList[0],
-        dryRun
-      })
-      expect(atlasRunFn).toHaveBeenNthCalledWith(2, {
-        ...expectedMigrationConfigList[1],
-        dryRun
-      })
+      expect(atlasRunFn).toHaveBeenCalledTimes(expectedMigrationConfigList.length)
+      for (const migrationConfig of expectedMigrationConfigList) {
+        expect(atlasRunFn).toHaveBeenCalledWith({
+          ...migrationConfig,
+          dryRun
+        })
+      }
     })
 
     it('should return response if atlas throws error for all migrations', async () => {
@@ -372,7 +430,13 @@ describe('runMigrationFromList', () => {
 
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const atlasRunFn = atlasRun.mockImplementation(async (_: MigrationConfig) => {
-        return Promise.reject(new MyError(`Atlas error for idx=${atlasRunFnCallCount++}`))
+        atlasRunFnCallCount++
+        if (atlasRunFnCallCount !== 2) {
+          return Promise.resolve(
+            AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=${atlasRunFnCallCount}`)
+          )
+        }
+        return Promise.reject(new MyError(`Atlas error for idx=${atlasRunFnCallCount}`))
       })
 
       const response = await migration.runMigrationFromList(migrationConfigList, dryRun)
@@ -380,23 +444,22 @@ describe('runMigrationFromList', () => {
       const expectedResponse: MigrationRunListResponse = {
         migrationAvailable: false,
         executionResponseList: [
-          AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=0`),
-          AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=1`)
+          AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=1`),
+          AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=2`),
+          AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=3`)
         ],
-        errMsg: 'Atlas error for idx=0'
+        errMsg: 'Atlas error for idx=2'
       }
 
       expect(response).toEqual(expectedResponse)
 
-      expect(atlasRunFn).toHaveBeenCalledTimes(2)
-      expect(atlasRunFn).toHaveBeenNthCalledWith(1, {
-        ...expectedMigrationConfigList[0],
-        dryRun
-      })
-      expect(atlasRunFn).toHaveBeenNthCalledWith(2, {
-        ...expectedMigrationConfigList[1],
-        dryRun
-      })
+      expect(atlasRunFn).toHaveBeenCalledTimes(expectedMigrationConfigList.length)
+      for (const migrationConfig of expectedMigrationConfigList) {
+        expect(atlasRunFn).toHaveBeenCalledWith({
+          ...migrationConfig,
+          dryRun
+        })
+      }
     })
 
     it('should return response if atlas throws error for some migrations', async () => {
@@ -417,22 +480,21 @@ describe('runMigrationFromList', () => {
         migrationAvailable: true,
         executionResponseList: [
           AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=0`),
-          getAtlasSuccessfulRunResponse()
+          getAtlasSuccessfulRunResponse(),
+          AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=2`)
         ],
-        errMsg: 'Atlas error for idx=0'
+        errMsg: 'Atlas error for idx=2'
       }
 
       expect(response).toEqual(expectedResponse)
 
-      expect(atlasRunFn).toHaveBeenCalledTimes(2)
-      expect(atlasRunFn).toHaveBeenNthCalledWith(1, {
-        ...expectedMigrationConfigList[0],
-        dryRun
-      })
-      expect(atlasRunFn).toHaveBeenNthCalledWith(2, {
-        ...expectedMigrationConfigList[1],
-        dryRun
-      })
+      expect(atlasRunFn).toHaveBeenCalledTimes(expectedMigrationConfigList.length)
+      for (const migrationConfig of expectedMigrationConfigList) {
+        expect(atlasRunFn).toHaveBeenCalledWith({
+          ...migrationConfig,
+          dryRun
+        })
+      }
     })
   })
 })

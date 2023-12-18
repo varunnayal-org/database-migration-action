@@ -11,6 +11,7 @@ export const formatterMap: Record<Platform, Formatter> = {
     failure: '❌',
     hSep: '|',
     rSep: '|',
+    tableCodeBlockAllowed: false,
     cEsc: function githubColumnValueEscape(column: string): string {
       // convert '|' to '\|'
       const regex = new RegExp(`\\${this.rSep}`, 'g')
@@ -36,6 +37,7 @@ export const formatterMap: Record<Platform, Formatter> = {
     failure: '(x)',
     hSep: '||',
     rSep: '|',
+    tableCodeBlockAllowed: true,
     cEsc: column => column, // could not find anything for jira
     headerBuilder: function jiraHeaders(headers: string[]): string {
       return `${this.hSep}${headers.join(this.hSep)}${this.hSep}`

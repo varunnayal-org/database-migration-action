@@ -4,10 +4,16 @@ import * as core from '@actions/core'
 
 import * as util from '../util'
 import { DatabaseConfig } from '../config'
-import { MigrationConfig, MigrationExecutionResponse, MigrationRunListResponse } from '../types'
+import {
+  LintExecutionResponse,
+  MigrationConfig,
+  MigrationExecutionResponse,
+  MigrationLintResponse,
+  MigrationRunListResponse
+} from '../types'
 import { SecretMap } from '../client/vault/types'
 import * as atlas from './atlas'
-import { AtlasMigrationExecutionResponse } from './atlas-class'
+import { AtlasLintResponse, AtlasMigrationExecutionResponse } from './atlas-class'
 
 export const TEMP_DIR_FOR_MIGRATION = 'tmp/__migrations__'
 
@@ -18,7 +24,8 @@ function getDirectoryForDb(baseDirectory: string, dbConfig: DatabaseConfig): str
 async function buildMigrationConfigList(
   baseDirectory: string,
   databases: DatabaseConfig[],
-  secrets: SecretMap
+  secrets: SecretMap,
+  devUrl: string
 ): Promise<MigrationConfig[]> {
   const migrationConfigList: MigrationConfig[] = []
 
@@ -41,7 +48,8 @@ async function buildMigrationConfigList(
       dir: tempMigrationSQLDir,
       dryRun: true,
       schema: dbConfig.schema,
-      baseline: dbConfig.baseline
+      baseline: dbConfig.baseline,
+      devUrl
     })
   }
 
@@ -54,6 +62,32 @@ function setDryRun(migrationConfigList: MigrationConfig[], dryRun: boolean): voi
   }
 }
 
+async function runLintFromList(migrationConfigList: MigrationConfig[]): Promise<MigrationLintResponse> {
+  const lintResponseList: LintExecutionResponse[] = []
+
+  let errMsg: string | undefined
+
+  for (const migrationConfig of migrationConfigList) {
+    try {
+      const lintResponse = await atlas.lint(migrationConfig)
+      if (!errMsg && lintResponse.getFirstError()) {
+        errMsg = lintResponse.getFirstError()
+      }
+      lintResponseList.push(lintResponse)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (ex: any) {
+      errMsg = ex.message || `${ex}`
+      const exceptionMessage = ex.message || `${ex}`
+      lintResponseList.push(AtlasLintResponse.fromError(exceptionMessage))
+      core.info(`Exception[tmp_dir=${migrationConfig.dir}]: ${ex}`)
+    }
+  }
+  return {
+    lintResponseList: lintResponseList,
+    errMsg
+  }
+}
+
 async function runMigrationFromList(
   migrationConfigList: MigrationConfig[],
   dryRun: boolean
@@ -61,6 +95,7 @@ async function runMigrationFromList(
   let migrationAvailable = false
   let errMsg: string | undefined
   const migrationResponseList: MigrationExecutionResponse[] = []
+
   for (const migrationConfig of migrationConfigList) {
     migrationConfig.dryRun = dryRun
     let response: MigrationExecutionResponse
@@ -70,17 +105,15 @@ async function runMigrationFromList(
         migrationAvailable = true
       }
 
-      if (response.getFirstError()) {
+      if (!errMsg && response.getFirstError()) {
         errMsg = response.getFirstError()
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (ex: any) {
       const exceptionMessage = ex.message || `${ex}`
-      if (!errMsg) {
-        errMsg = ex.message || `${ex}`
-      }
+      errMsg = ex.message || `${ex}`
       response = AtlasMigrationExecutionResponse.fromError(exceptionMessage)
-      core.info(`Exception[tmp_dir=${migrationConfig.dir}]: ${ex}`)
+      core.info(`Exception[tmp_dir=${migrationConfig.dir}]: ${ex} ${ex.stack}`)
     }
     migrationResponseList.push(response)
   }
@@ -110,4 +143,4 @@ async function ensureSQLFilesInMigrationDir(sourceDir: string, destinationDir: s
   }
 }
 
-export { getDirectoryForDb, setDryRun, buildMigrationConfigList, runMigrationFromList }
+export { getDirectoryForDb, setDryRun, buildMigrationConfigList, runMigrationFromList, runLintFromList }

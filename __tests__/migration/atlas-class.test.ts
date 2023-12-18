@@ -24,9 +24,9 @@ function getBaseExecutionList(): VersionExecution[] {
   ]
 }
 
-describe('AtlasMigrationExecutionResponse.fromResponse', () => {
+describe('AtlasMigrationExecutionResponse.build', () => {
   it('should build when migration run successfully', async () => {
-    const response = AtlasMigrationExecutionResponse.fromResponse(JSON.stringify(getBaseExecutionList()))
+    const response = AtlasMigrationExecutionResponse.build(JSON.stringify(getBaseExecutionList()))
 
     expect(response).toEqual({
       containsMigrations: true,
@@ -62,7 +62,7 @@ describe('AtlasMigrationExecutionResponse.fromResponse', () => {
       Text: `pq: table "users.bkp" does not exist`
     }
 
-    const response = AtlasMigrationExecutionResponse.fromResponse(JSON.stringify(atlasMigrateApplyJSONResponse))
+    const response = AtlasMigrationExecutionResponse.build(JSON.stringify(atlasMigrateApplyJSONResponse))
 
     expect(response).toEqual({
       firstError: 'pq: table "users.bkp" does not exist',
@@ -106,7 +106,7 @@ describe('AtlasMigrationExecutionResponse.fromResponse', () => {
     // atlas returns early error
     atlasMigrateApplyJSONResponse.pop()
 
-    const response = AtlasMigrationExecutionResponse.fromResponse(JSON.stringify(atlasMigrateApplyJSONResponse))
+    const response = AtlasMigrationExecutionResponse.build(JSON.stringify(atlasMigrateApplyJSONResponse))
 
     expect(response).toEqual({
       firstError: 'pq: table "users.bkp" does not exist',
@@ -136,7 +136,7 @@ describe('AtlasMigrationExecutionResponse.fromResponse', () => {
       ['', 'empty string']
     ]) {
       it(`when response is ${label}`, async () => {
-        const response = AtlasMigrationExecutionResponse.fromResponse(value)
+        const response = AtlasMigrationExecutionResponse.build(value)
         expect(response).toEqual({
           containsMigrations: false,
           migrations: []
@@ -146,7 +146,7 @@ describe('AtlasMigrationExecutionResponse.fromResponse', () => {
   })
 
   it('should build when non json string is passed', () => {
-    const response = AtlasMigrationExecutionResponse.fromResponse('some atlas error')
+    const response = AtlasMigrationExecutionResponse.build('some atlas error')
     expect(response).toEqual({
       firstError: 'some atlas error',
       containsMigrations: false,
