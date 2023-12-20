@@ -90,4 +90,41 @@ async function exec(command: string, args: string[]): Promise<string> {
   })
 }
 
+/**
+ * Filters out files that are not present in the pathPrefixList
+ * @param pathPrefixList
+ * @param changedFiles
+ */
+export function globFromList(
+  migrationDirPathList: string[],
+  changedFiles: string[]
+): { matched: string[][]; unmatched: string[] } {
+  const matched: string[][] = migrationDirPathList.map(() => [])
+  const unmatched: string[] = []
+
+  // eslint-disable-next-line @typescript-eslint/prefer-for-of
+  for (let fileIdx = 0; fileIdx < changedFiles.length; fileIdx++) {
+    const changedFile = changedFiles[fileIdx]
+    let matchMigrationDirIdx = -1
+    for (let idx = 0; idx < migrationDirPathList.length; idx++) {
+      const migrationDirPath = migrationDirPathList[idx]
+
+      if (changedFile.startsWith(migrationDirPath)) {
+        matchMigrationDirIdx = idx
+        break
+      }
+    }
+
+    // no match found
+    if (matchMigrationDirIdx === -1) {
+      unmatched.push(changedFile)
+      continue
+    }
+
+    matched[matchMigrationDirIdx].push(changedFile)
+  }
+
+  return { matched, unmatched }
+}
+
 export { createTempDir, removeDir, cleanDir, getEnv, getInput, exec, readableDate }

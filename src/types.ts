@@ -1,6 +1,12 @@
 import { JiraIssue } from './client/jira'
 import { User } from './types.gha'
 
+export interface ChangedFileValidationError {
+  errMsg: string
+  migrationAvailable: boolean
+  unmatched: string[]
+}
+
 export interface MigrationLintResponse {
   lintResponseList: LintExecutionResponse[]
   errMsg?: string
@@ -19,6 +25,7 @@ export interface MigrationConfig {
   schema: string
   dryRun: boolean
   devUrl: string
+  lintLatestFiles?: number
 }
 
 export interface MatchTeamWithPRApproverResult {
@@ -203,6 +210,8 @@ export interface LintFileResult {
  */
 export interface LintExecutionResponse {
   getFileLintResults(): LintFileResult[]
+
+  getMigrationDirectory(): string
 
   getFirstError(): string | undefined
 }

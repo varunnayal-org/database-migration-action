@@ -4,13 +4,20 @@ import JiraClient, { JiraComment, JiraIssue } from './client/jira'
 import { Config } from './config'
 import { TextBuilder } from './formatting/text-builder'
 import { getDirectoryForDb } from './migration/migration'
-import { MigrationLintResponse, MigrationMeta, MigrationRunListResponse } from './types'
+import { ChangedFileValidationError, MigrationLintResponse, MigrationMeta, MigrationRunListResponse } from './types'
 import * as gha from './types.gha'
 
 export type NotifyResponse = {
   githubComment: IssueCreateCommentResponse | IssueUpdateCommentResponse
   jiraIssue?: JiraIssue
   jiraComment?: JiraComment
+}
+
+export type NotifyParams = {
+  migrationRunListResponse: MigrationRunListResponse
+  lintResponseList?: MigrationLintResponse
+  jiraIssue?: JiraIssue | null | undefined
+  changedFileValidation?: ChangedFileValidationError
 }
 
 export class NotifierService {
@@ -39,14 +46,18 @@ export class NotifierService {
 
   async buildGithubComment(
     builder: TextBuilder,
-    migrationRunListResponse: MigrationRunListResponse,
-    lintResponseList?: MigrationLintResponse
+    params: NotifyParams
   ): Promise<IssueUpdateCommentResponse | IssueCreateCommentResponse> {
-    let githubSummaryText: string = ''
-    if (lintResponseList && lintResponseList.errMsg) {
-      githubSummaryText = builder.githubLint(lintResponseList.lintResponseList)
+    let githubSummaryText = ''
+    if (params.changedFileValidation?.errMsg) {
+      githubSummaryText = `**Changed File Validation Error**: ${params.changedFileValidation.errMsg}
+Unmatched Files:
+- ${params.changedFileValidation.unmatched.map(f => f).join('\r\n- ')}
+`
+    } else if (params.lintResponseList && params.lintResponseList.errMsg) {
+      githubSummaryText = builder.githubLint(params.lintResponseList.lintResponseList)
     } else {
-      githubSummaryText = builder.github(migrationRunListResponse)
+      githubSummaryText = builder.github(params.migrationRunListResponse)
     }
 
     core.summary.addRaw(githubSummaryText)
@@ -70,24 +81,32 @@ export class NotifierService {
 
   async buildJiraComment(
     builder: TextBuilder,
-    migrationRunListResponse: MigrationRunListResponse,
-    lintResponseList?: MigrationLintResponse,
-    jiraIssue?: JiraIssue | null | undefined
+    params: NotifyParams
   ): Promise<[Promise<JiraIssue | undefined>, Promise<JiraComment | undefined>]> {
+    const { migrationRunListResponse, lintResponseList } = params
+    let jiraIssue = params.jiraIssue
+
     let jiraIssuePromise: Promise<JiraIssue | undefined> = Promise.resolve(undefined)
     let jiraCommentPromise: Promise<JiraComment | undefined> = Promise.resolve(undefined)
 
+    /**
+     * We will have JIRA integration iff
+     * - We are applying migration instead of dry running it
+     * - OR
+     * - - We don't have any changed file validation error AND
+     * - - Caller has explicitly asked for JIRA integration(pull_request event) AND
+     * - - Migration is available AND
+     * - - AND
+     * - - - There is no error message while running dry running migration OR
+     * - - - JIRA issue is already present
+     */
     const canIntegrateWithJira =
-      // if applying migration
       this.#dryRun === false ||
-      // else for dry run
-      // if a pr event (open, reopen, sync)
       !!(
+        !params.changedFileValidation &&
         this.#migrationMeta.ensureJiraTicket &&
-        // migration should be available
-        migrationRunListResponse.migrationAvailable &&
-        // no error message should exists
-        (!migrationRunListResponse.errMsg || jiraIssue)
+        params.migrationRunListResponse.migrationAvailable &&
+        (!params.migrationRunListResponse.errMsg || params.jiraIssue)
       )
 
     core.debug(`Can create JIRA Issue or Command: ${canIntegrateWithJira ? 'Yes' : 'No'}`)
@@ -100,7 +119,7 @@ export class NotifierService {
       jiraIssue = await this.#jiraClient.findIssue(this.#pr.html_url)
     }
 
-    let issueComment: string = ''
+    let issueComment = ''
     if (lintResponseList && lintResponseList.errMsg) {
       issueComment = builder.jiraLint(lintResponseList.lintResponseList)
     } else {
@@ -124,11 +143,7 @@ export class NotifierService {
     return [jiraIssuePromise, jiraCommentPromise]
   }
 
-  async notify(
-    migrationRunListResponse: MigrationRunListResponse,
-    lintResponseList?: MigrationLintResponse,
-    jiraIssue?: JiraIssue | null | undefined
-  ): Promise<NotifyResponse> {
+  async notify(params: NotifyParams): Promise<NotifyResponse> {
     const builder = new TextBuilder(
       this.#dryRun,
       this.#pr.html_url,
@@ -136,13 +151,8 @@ export class NotifierService {
       this.#config.databases.map(db => getDirectoryForDb(this.#config.baseDirectory, db))
     )
 
-    const ghCommentPromise = this.buildGithubComment(builder, migrationRunListResponse, lintResponseList)
-    const [jiraIssuePromise, jiraCommentPromise] = await this.buildJiraComment(
-      builder,
-      migrationRunListResponse,
-      lintResponseList,
-      jiraIssue
-    )
+    const ghCommentPromise = this.buildGithubComment(builder, params)
+    const [jiraIssuePromise, jiraCommentPromise] = await this.buildJiraComment(builder, params)
 
     const response = await Promise.allSettled([
       ghCommentPromise,

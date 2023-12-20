@@ -182,16 +182,28 @@ class Client {
     )
   }
 
+  #tryGetPullRequest(): RestEndpointMethodTypes['pulls']['get']['response']['data'] | undefined {
+    try {
+      const pr = JSON.parse(process.env.PR_DETAILS || '') as RestEndpointMethodTypes['pulls']['get']['response']['data']
+      core.debug('Fetched PR Details from env')
+
+      return pr
+    } catch (ex) {
+      return undefined
+    }
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getPRInformation(prNumber: number): Promise<any> {
-    const pr = this.#validateAPIResponse(
-      'Get PR Information',
-      await this.#client.rest.pulls.get({
-        owner: this.#repoOwner,
-        repo: this.#repoName,
-        pull_number: prNumber
-      })
-    )
+    const pr =
+      this.#tryGetPullRequest() ||
+      this.#validateAPIResponse(
+        'Get PR Information',
+        await this.#client.rest.pulls.get({
+          owner: this.#repoOwner,
+          repo: this.#repoName,
+          pull_number: prNumber
+        })
+      )
     return {
       defaultBranchRef: {
         name: pr.base.repo.default_branch
@@ -215,7 +227,23 @@ class Client {
     }
   }
 
+  #tryGetChangedFiles(): string[] | undefined {
+    try {
+      core.debug(`PR_CHANGED_FILES: ${process.env.PR_CHANGED_FILES || ''}`)
+      const changedFiles = JSON.parse(process.env.PR_CHANGED_FILES || '') as string[]
+      core.debug('Fetched PR Changed files from env')
+      return changedFiles
+    } catch (ex) {
+      return undefined
+    }
+  }
+
   async getChangedFiles(prNumber: number): Promise<string[]> {
+    const changedFileListFromEnv = this.#tryGetChangedFiles()
+    if (changedFileListFromEnv !== undefined) {
+      core.info(`Changed Files from env: ${JSON.stringify(changedFileListFromEnv)}`)
+      return changedFileListFromEnv
+    }
     const response = this.#validateAPIResponse(
       'Get Changed Files',
       await this.#client.rest.pulls.listFiles({
@@ -224,7 +252,13 @@ class Client {
         pull_number: prNumber
       })
     )
-    return response.map(file => file.filename)
+
+    return response
+      .filter(
+        file =>
+          file.status === 'added' || file.status === 'modified' || file.status === 'renamed' || file.status === 'copied'
+      )
+      .map(file => file.filename)
   }
 }
 

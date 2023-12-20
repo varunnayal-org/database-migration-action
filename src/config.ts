@@ -18,11 +18,6 @@ export interface Config {
   baseDirectory: string
 
   /**
-   * Base branch to which merging should occur.
-   */
-  baseBranch: string
-
-  /**
    * Label to add on PR.
    */
   prLabel: string
@@ -50,10 +45,23 @@ export interface Config {
   // These are filled by code
 
   /**
+   * Base branch to which merging should occur.
+   */
+  baseBranch: string
+
+  /**
+   * Name of the config file.
+   */
+  configFileName: string
+
+  /**
    * List of secrets to fetch from AWS Secrets Manager. Generated from "databases.*.envName".
    */
   dbSecretNameList: string[]
 
+  /**
+   * URL of the development database used for linting.
+   */
   devDBUrl: string
 
   /**
@@ -69,7 +77,8 @@ export interface DatabaseConfig {
   envName: string
 }
 
-function prepareRuntimeConfig(config: Config): void {
+function prepareRuntimeConfig(config: Config, configFileName: string): void {
+  config.configFileName = configFileName
   config.devDBUrl = core.getInput('dev_db_url')
 
   config.dbSecretNameList = config.databases.reduce<string[]>((acc, dbConfig, idx) => {
@@ -120,7 +129,7 @@ export default function buildConfig(): Config {
 
   config.prLabel = config.prLabel || 'db-migration'
 
-  prepareRuntimeConfig(config)
+  prepareRuntimeConfig(config, configFileName)
 
   core.debug(`Loaded Config from ${configFileName}: ${JSON.stringify(config)}`)
 

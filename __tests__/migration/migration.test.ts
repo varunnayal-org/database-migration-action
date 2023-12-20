@@ -114,25 +114,26 @@ describe('buildMigrationConfigList', () => {
 
   describe('single_database', () => {
     it('should return migration config list', async () => {
-      expect(await migration.buildMigrationConfigList('migrations', [getDB()], getVaultKeyStore(), devDBUrl)).toEqual(
+      expect(await migration.buildMigrationConfigList('migrations', [getDB()], devDBUrl, getVaultKeyStore())).toEqual(
         getExpectedMigrationConfigList()
       )
     })
 
     it('should ignore non sql files', async () => {
-      expect(await migration.buildMigrationConfigList('migrations', [getDB()], getVaultKeyStore(), devDBUrl)).toEqual(
+      expect(await migration.buildMigrationConfigList('migrations', [getDB()], devDBUrl, getVaultKeyStore())).toEqual(
         getExpectedMigrationConfigList()
       )
 
       expect(await fs.readdir(migration.TEMP_DIR_FOR_MIGRATION)).toEqual([
         '00000000000001_create_test_table.sql',
-        '00000000000002_create_test2_table.sql'
+        '00000000000002_create_test2_table.sql',
+        'atlas.hcl'
       ])
     })
 
     it('should throw error if secret not found', async () => {
       await expect(
-        migration.buildMigrationConfigList('migrations', [getDB()], getVaultKeyStore('test1'), devDBUrl)
+        migration.buildMigrationConfigList('migrations', [getDB()], devDBUrl, getVaultKeyStore('test1'))
       ).rejects.toThrow('Secret test not found')
     })
 
@@ -165,39 +166,36 @@ describe('buildMigrationConfigList', () => {
     })
 
     it('should return migration config list', async () => {
-      expect(await migration.buildMigrationConfigList('multi_db_dir', dbs, vaultKeyStore, devDBUrl)).toEqual(
+      expect(await migration.buildMigrationConfigList('multi_db_dir', dbs, devDBUrl, vaultKeyStore)).toEqual(
         expectedMigrationConfigList
       )
     })
 
     it('should ignore non sql files', async () => {
-      expect(await migration.buildMigrationConfigList('multi_db_dir', dbs, vaultKeyStore, devDBUrl)).toEqual(
+      expect(await migration.buildMigrationConfigList('multi_db_dir', dbs, devDBUrl, vaultKeyStore)).toEqual(
         expectedMigrationConfigList
       )
 
       expect(await fs.readdir(expectedMigrationConfigList[0].dir)).toEqual([
         '00000000000005_create_test5_table.sql',
-        '00000000000006_create_test6_table.sql'
+        '00000000000006_create_test6_table.sql',
+        'atlas.hcl'
       ])
 
       expect(await fs.readdir(expectedMigrationConfigList[1].dir)).toEqual([
         '00000000000007_create_test7_table.sql',
         '00000000000008_create_test8_table.sql',
-        '00000000000009_create_test9_table.sql'
+        '00000000000009_create_test9_table.sql',
+        'atlas.hcl'
       ])
     })
 
     it('should throw error if secret not found', async () => {
       await expect(
-        migration.buildMigrationConfigList(
-          'multi_db_dir',
-          dbs,
-          {
-            ...vaultKeyStore,
-            db2_key: ''
-          },
-          devDBUrl
-        )
+        migration.buildMigrationConfigList('multi_db_dir', dbs, devDBUrl, {
+          ...vaultKeyStore,
+          db2_key: ''
+        })
       ).rejects.toThrow('Secret db2_key not found')
     })
 

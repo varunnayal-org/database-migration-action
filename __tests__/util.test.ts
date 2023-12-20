@@ -1,5 +1,6 @@
 import * as core from '@actions/core'
 import * as util from '../src/util'
+import path from 'path'
 
 describe('util', () => {
   describe('getEnv', () => {
@@ -45,6 +46,148 @@ describe('util', () => {
       getInputMock.mockReturnValue('')
       expect(() => util.getInput('test')).toThrow('Input test is not set')
       expect(getInputMock).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('globFromList', () => {
+    function run(dirList: string[], expectedResult: string[][], expectedUnmatchedFiles: string[] = []): void {
+      const changedFiles = [
+        ...expectedResult.reduce((acc, files) => [...acc, ...files], [...expectedUnmatchedFiles])
+      ].sort(
+        // randomize the order
+        () => Math.random() - 0.5
+      )
+      const glob = util.globFromList(dirList, changedFiles)
+
+      glob.matched = glob.matched.map(files => files.sort())
+      glob.unmatched = glob.unmatched.sort()
+
+      expect(glob).toEqual({
+        matched: expectedResult.map(files => files.sort()),
+        unmatched: expectedUnmatchedFiles.sort()
+      })
+    }
+
+    function getFiles(dir: string, files: string[] = ['test1.sql', 'test2.sql', 'atlas.hcl', 'atlas.sum']): string[] {
+      return files
+        .map(file => path.join(dir, file))
+        .sort(
+          // randomize the order
+          () => Math.random() - 0.5
+        )
+    }
+
+    describe('single migration directory', () => {
+      it('should return matched files', () => {
+        const expectedResult = [getFiles('migrations')]
+
+        run(['migrations'], expectedResult)
+      })
+
+      it('should return matched and unmatched files', () => {
+        const expectedResult = [getFiles('migrations')]
+        const expectedUnmatchedFiles = [
+          'migration/a.sql',
+          'atlas.hcl',
+          'db.migration.json',
+          '.github/workflows/db-schema-migration.yml'
+        ]
+
+        run(['migrations'], expectedResult, expectedUnmatchedFiles)
+      })
+
+      it('should return unmatched files', () => {
+        const expectedResult = [[]]
+
+        const expectedUnmatchedFiles = [
+          ...getFiles('migrations/db1'),
+
+          // other
+          'migration/a.sql',
+          'atlas.hcl',
+          'db.migration.json',
+          '.github/workflows/db-schema-migration.yml',
+          'migrations/db3/test1.sql',
+          'migrations/test1.sql'
+        ]
+        run(['migrations/db2'], expectedResult, expectedUnmatchedFiles)
+        run(['a/migrations/db2'], expectedResult, expectedUnmatchedFiles)
+        run(['abc'], expectedResult, expectedUnmatchedFiles)
+      })
+    })
+
+    describe('multiple migration directory', () => {
+      it('should return matched files', () => {
+        const expectedResult = [getFiles('migrations/db1'), getFiles('migrations/db2')]
+        const expectedUnmatchedFiles = [
+          'migration/a.sql',
+          'atlas.hcl',
+          'db.migration.json',
+          '.github/workflows/db-schema-migration.yml',
+          'migrations/db3/test1.sql',
+          'migrations/test1.sql'
+        ]
+        run(['migrations/db1', 'migrations/db2'], expectedResult, expectedUnmatchedFiles)
+        run(['migrations/db2', 'migrations/db1'], [expectedResult[1], expectedResult[0]], expectedUnmatchedFiles)
+      })
+
+      it('should return matched and unmatched files', () => {
+        const expectedResult = [getFiles('migrations/db1'), getFiles('migrations/db2')]
+
+        const expectedUnmatchedFiles = [
+          'migration/a.sql',
+          'atlas.hcl',
+          'db.migration.json',
+          '.github/workflows/db-schema-migration.yml',
+          'migrations/db3/test1.sql',
+          'migrations/test1.sql'
+        ]
+        run(['migrations/db1', 'migrations/db2'], expectedResult, expectedUnmatchedFiles)
+        run(['migrations/db2', 'migrations/db1'], [expectedResult[1], expectedResult[0]], expectedUnmatchedFiles)
+      })
+
+      it('should return unmatched files', () => {
+        const expectedResult = [[], []]
+
+        const expectedUnmatchedFiles = [
+          // migrations/db1
+          ...getFiles('migrations/db1'),
+          // migrations/db2
+          ...getFiles('migrations/db2'),
+
+          // other
+          'migration/a.sql',
+          'atlas.hcl',
+          'db.migration.json',
+          '.github/workflows/db-schema-migration.yml',
+          'migrations/db3/test1.sql',
+          'migrations/test1.sql'
+        ]
+        run(['migrations/db4', 'migrations/db5'], expectedResult, expectedUnmatchedFiles)
+        run(['migrations/db4', 'abc', 'data'], [[], [], []], expectedUnmatchedFiles)
+      })
+
+      it('should return match prefix', () => {
+        const expectedResult = [
+          [
+            // migrations/db1
+            ...getFiles('migrations/db1'),
+            // migrations/db2
+            ...getFiles('migrations/db2')
+          ]
+        ]
+
+        const expectedUnmatchedFiles = [
+          // other
+          'migration/a.sql',
+          'atlas.hcl',
+          'db.migration.json',
+          '.github/workflows/db-schema-migration.yml',
+          'migrations/test1.sql'
+        ]
+
+        run(['migrations/db'], expectedResult, expectedUnmatchedFiles)
+      })
     })
   })
 })

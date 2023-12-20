@@ -118,6 +118,7 @@ export class AtlasMigrationExecutionResponse implements MigrationExecutionRespon
         }
         return versionExecution
       })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (ex: any) {
       if (atlasResponse && atlasResponse !== 'null') {
         firstError = atlasResponse
@@ -165,6 +166,22 @@ class AtlasFileDiagnostic implements LintDiagnosticError {
   }
 }
 
+export class AtlasLintFileErrorDiagnostic implements LintDiagnosticError {
+  constructor(private error: string) {}
+  getMessage(): string {
+    return this.error
+  }
+  getErrorCode(): string {
+    return ''
+  }
+  getPosition(): number {
+    return -1
+  }
+  getHelpUrl(): string {
+    return ''
+  }
+}
+
 export class FileLintResponse implements LintFileResult {
   constructor(
     private filename: string,
@@ -198,7 +215,8 @@ export class AtlasLintResponse implements LintExecutionResponse {
    * @param byFilename
    */
   constructor(
-    private fileLintResults: FileLintResponse[],
+    private fileLintResults: LintFileResult[],
+    private migrationDir: string,
     private firstError?: string
   ) {}
 
@@ -210,28 +228,35 @@ export class AtlasLintResponse implements LintExecutionResponse {
     return this.firstError
   }
 
-  static fromError(error: string): AtlasLintResponse {
-    return new AtlasLintResponse([], error)
+  getMigrationDirectory(): string {
+    return this.migrationDir
   }
 
-  static build(atlasResponse: string): AtlasLintResponse {
+  static fromError(error: string, migrationDir: string): AtlasLintResponse {
+    return new AtlasLintResponse([], migrationDir, error)
+  }
+
+  static build(atlasResponse: string, migrationDir: string): AtlasLintResponse {
     let firstError: string | undefined
-    let fileLintResults: FileLintResponse[] = []
+    let fileLintResults: LintFileResult[] = []
     try {
       const parsedAtlasResponse = JSON.parse(atlasResponse)
       if (parsedAtlasResponse === null) {
         throw new Error('null response')
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       fileLintResults = parsedAtlasResponse.map((reportContext: any) => {
-        // If no errors, then simply ignore the file
-        if (!reportContext.Reports) {
-          return null
+        const diagnostics: LintDiagnosticError[] = []
+
+        if (reportContext.Error) {
+          if (!firstError) {
+            firstError = reportContext.Error
+          }
+          diagnostics.push(new AtlasLintFileErrorDiagnostic(reportContext.Error))
         }
 
-        const diagnostics: AtlasFileDiagnostic[] = []
-
-        for (const reportJson of reportContext.Reports) {
+        for (const reportJson of reportContext.Reports || []) {
           for (const diagnosticJson of reportJson.Diagnostics || []) {
             if (!firstError) {
               firstError = diagnosticJson.Text
@@ -245,15 +270,17 @@ export class AtlasLintResponse implements LintExecutionResponse {
         if (diagnostics.length > 0) {
           return new FileLintResponse(reportContext.Name, diagnostics)
         }
+        return null
       })
 
       fileLintResults = fileLintResults.filter(lintResult => lintResult !== null)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (ex: any) {
       if (atlasResponse && atlasResponse !== 'null') {
         firstError = atlasResponse
       }
     }
 
-    return new AtlasLintResponse(fileLintResults, firstError)
+    return new AtlasLintResponse(fileLintResults, migrationDir, firstError)
   }
 }

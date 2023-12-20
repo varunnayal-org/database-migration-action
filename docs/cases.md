@@ -1,17 +1,20 @@
 # Cases
 
 - [Cases](#cases)
-  - [Out of order](#out-of-order)
+  - [Out of order Execution](#out-of-order-execution)
+  - [Lock and timeouts](#lock-and-timeouts)
+  - [Drop index concurrently issue](#drop-index-concurrently-issue)
   - [Database is not clean](#database-is-not-clean)
     - [migrate lint](#migrate-lint)
+      - [pg\_repack extension](#pg_repack-extension)
     - [migrate apply](#migrate-apply)
-  - [Index Creation](#index-creation)
+  - [Index](#index)
     - [Non Concurrent](#non-concurrent)
     - [Concurrent](#concurrent)
   - [Statement Error](#statement-error)
     - [Transaction Mode](#transaction-mode)
       - [Syntax Error](#syntax-error)
-      - [Run time error](#run-time-error)
+      - [Runtime error](#runtime-error)
     - [Non-Transaction Mode](#non-transaction-mode)
       - [Fixing partial migrations](#fixing-partial-migrations)
         - [Update statement](#update-statement)
@@ -20,11 +23,30 @@
     - [Post killing migration statement](#post-killing-migration-statement)
   - [Issues](#issues)
 
-## Out of order
+## Out of order Execution
 
-Consider dev1 creates a migration file with revision T1 and another dev(dev2) created T2. T2 ends up publishing their changes first(PR flow). Later, when dev1 decides to take T1 like, migration won't apply as T2 has been captured as the latest migration. Handling [non-linear](https://atlasgo.io/lint/analyzers#non-linear-changes) execution order is not recommended.
+Consider userA creates a migration file with revision T1 and another dev(user2) create T2(version T1 < T2). T2 ends up publishing their changes first(PR flow). Later, when userA decides to take T1 like, migration shouldn't apply and error out as T2 has been captured as the latest migration and trying to apply migration T1 would mean applying back-dated migration. Handling [non-linear](https://atlasgo.io/lint/analyzers#non-linear-changes) execution order is not recommended.
 
-`--exec-order` as an option is not available till latest atlas [release v0.15.0](https://github.com/ariga/atlas/releases/tag/v0.15.0) and is schedule for next release. Once that is available, we can use this flag which captures such issues.
+`--exec-order` as an option to tackle this situation but is not available till latest atlas [release v0.15.0](https://github.com/ariga/atlas/releases/tag/v0.15.0) and is schedule for next release. Once that is available, we can use this flag which captures such issues.
+
+## Lock and timeouts
+
+Currently, in atlas, there is not way to implement what is prescribed in [zero downtime migrations](https://postgres.ai/blog/20210923-zero-downtime-postgres-schema-migrations-lock-timeout-and-retries).
+
+It has been raised with atlas
+
+- Issue: [#2345](https://github.com/ariga/atlas/issues/2345)
+
+## Drop index concurrently issue
+
+Linting process allows you to drop indexes only with `concurrently` option running outside of transaction. Currently there is a bug in atlas that does not honor it, though it works for concurrent index creation.
+
+Same has been raised with atlas
+
+- Issue: [#2375](https://github.com/ariga/atlas/issues/2375)
+- PR : [PR#2376](https://github.com/ariga/atlas/pull/2376)
+
+Should be fixed with next version of atlas, probably v0.16.0.
 
 ## Database is not clean
 
@@ -45,16 +67,48 @@ ALTER DATABASE dev_db OWNER TO dev_db;
 
 This should fix it.
 
+#### pg_repack extension
+
+Consider the baseline version file
+
+```sql
+CREATE EXTENSION pg_repack;
+```
+
+Now, during linting, we'll get an error stating
+
+```sh
+atlas migrate lint --dev-url "${DEV_DB}" --dir file://migrations
+
+Error: restore dev-database snapshot: Drop schema named "repack": pq: cannot drop schema repack because extension pg_repack requires it
+```
+
+This is because `atlas` tries to remove the schema `repack` that gets auto created while clearing command it ran during linting check.
+
+To overcome this, add `DROP EXTENSION pg_repack;` as well
+
+```sql
+CREATE EXTENSION pg_repack;
+DROP EXTENSION pg_repack;
+```
+
+**Why not remove the sql statement related to pg_repack**: It could be the case that the extension might exist in actual DB but not in dev db.
+Hence removing it will result in `atlas migrate apply` command to fail.
+
 ### migrate apply
 
 Error: sql/migrate: connected database is not clean: found 2 tables in schema "public". baseline version or allow-dirty is required
 
-## Index Creation
+## Index
 
 ### Non Concurrent
 
+[TODO] This won't work if we are using linting.
+
 ```sql
 CREATE UNIQUE INDEX "idx_email" ON "public"."user" ("email");
+-- or
+DELETE INDEX idx_email;
 ```
 
 - Should only be used when you know the table might not block.
@@ -63,9 +117,11 @@ CREATE UNIQUE INDEX "idx_email" ON "public"."user" ("email");
 
 ```sql
 CREATE INDEX CONCURRENTLY "idx_uniq_email" ON "public"."user" ("email");
+-- or
+DELETE INDEX CONCURRENTLY idx_email;
 ```
 
-This command will fail as creation on index concurrently cannot be withing a transactional block.
+This command will fail as creation/deletion of index concurrently cannot be within a transactional block.
 
 ```sh
 pq: CREATE INDEX CONCURRENTLY cannot run inside a transaction block
@@ -77,6 +133,7 @@ To over come, update the file with
 -- atlas:txmode none
 
 CREATE INDEX CONCURRENTLY "idx_uniq_email" ON "public"."user" ("email");
+DELETE INDEX CONCURRENTLY idx_uniq_email;
 ```
 
 > **NOTE**: Ensure an empty line after atlas directive
@@ -125,7 +182,7 @@ Running `atlas migrate lint --format '{{ .Files }}'` will output
 ]
 ```
 
-#### Run time error
+#### Runtime error
 
 Consider the following migration file
 
@@ -335,7 +392,7 @@ Once killed, DBA/service owner can decide how they wish to proceed with the migr
 
 ## Issues
 
-1. If database url is missing
+1. If database URL is missing
 
     > [DryRun] Migrations failed 11/21/2023, 9:15:28 PM (Execution): Dir=tmp/migrations getaddrinfo ENOTFOUND base
     > Directory: 'migrations'

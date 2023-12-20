@@ -120,36 +120,57 @@ export class TextBuilder {
   }
 
   #buildLintMessage(lintResults: LintExecutionResponse[], fmt: Formatter): string {
-    const lintMessage = lintResults.reduce<string>(
-      (tableRows, lintResult) => {
-        // No error, no need to show
-        if (!lintResult.getFirstError()) {
-          return tableRows
+    const nonTableErrors: string[] = []
+    const tableRowsStr = lintResults.reduce<string>((tableRows, lintResult) => {
+      // No error, no need to show
+      if (!lintResult.getFirstError()) {
+        return tableRows
+      }
+
+      if (lintResult.getFileLintResults().length === 0) {
+        nonTableErrors.push(
+          `${fmt.rSep}${lintResult.getMigrationDirectory()}${fmt.rSep}${lintResult.getFirstError() as string}${
+            fmt.rSep
+          }`
+        )
+      }
+
+      const rowString: string[] = []
+      for (const fileLintResult of lintResult.getFileLintResults()) {
+        for (const lintError of fileLintResult.getDiagnostics()) {
+          const rowData = [
+            // filename
+            fileLintResult.getName(),
+            // error
+            fmt.cEsc(lintError.getMessage()),
+            // error code
+            lintError.getHelpUrl()
+              ? fmt.linkBuilder(lintError.getErrorCode(), lintError.getHelpUrl())
+              : lintError.getErrorCode(),
+            // position
+            lintError.getPosition() >= 0 ? lintError.getPosition() : ''
+          ]
+
+          rowString.push(`${fmt.rSep}${rowData.join(fmt.rSep)}${fmt.rSep}`)
         }
+      }
 
-        const rowString: string[] = []
-        for (const fileLintResult of lintResult.getFileLintResults()) {
-          for (const lintError of fileLintResult.getDiagnostics()) {
-            const rowData = [
-              // filename
-              fileLintResult.getName(),
-              // error
-              fmt.cEsc(lintError.getMessage()),
-              // error code
-              fmt.linkBuilder(lintError.getErrorCode(), lintError.getHelpUrl()),
-              // position
-              lintError.getPosition()
-            ]
+      if (rowString.length === 0) {
+        return tableRows
+      }
 
-            rowString.push(`${fmt.rSep}${rowData.join(fmt.rSep)}${fmt.rSep}`)
-          }
-        }
-
-        return `${tableRows}\n${rowString.join('\n')}\n`
-      },
-      fmt.headerBuilder(['File', 'Error', 'Error Code', 'Position'])
-    )
-    return `**Lint Errors**\n${lintMessage}\n`
+      return `${tableRows}\n${rowString.join('\n')}\n`
+    }, '')
+    let msg = `\n**Lint Errors**\n`
+    if (tableRowsStr.length > 0) {
+      msg += `${fmt.headerBuilder(['File', 'Error', 'Error Code', 'Position'])}${tableRowsStr}\n`
+    }
+    if (nonTableErrors.length > 0) {
+      msg += `\n**Directory Errors**:\n${fmt.headerBuilder(['Migration Directory', 'Error'])}\n${nonTableErrors.join(
+        '\n'
+      )}\n`
+    }
+    return msg
   }
 
   githubLint(lintResults: LintExecutionResponse[]): string {

@@ -140,7 +140,7 @@ class Client {
 
   static fromEnv(config?: Config): Client | null {
     if (config) {
-      return new Client(getInput('jira_username'), getInput('jira_token'), config)
+      return new Client(getInput('jira_username'), getInput('jira_password'), config)
     }
     return null
   }

@@ -1,22 +1,34 @@
+import path from 'path'
 import * as core from '@actions/core'
 import GHClient from './client/github'
 import JiraClient, { JiraIssue } from './client/jira'
 import { Config } from './config'
 import * as gha from './types.gha'
-import { runMigrationFromList, buildMigrationConfigList, runLintFromList } from './migration/migration'
 import {
-  MigrationRunListResponse,
+  runMigrationFromList,
+  buildMigrationConfigList,
+  runLintFromList,
+  hydrateMigrationConfigList,
+  hasExtensions,
+  hasExtension,
+  getRelativePathForDbDirectory
+} from './migration/migration'
+import {
   MatchTeamWithPRApproverResult,
   RunMigrationResult,
   MigrationMeta,
-  MigrationLintResponse
+  MigrationLintResponse,
+  MigrationConfig,
+  ChangedFileValidationError
 } from './types'
 import { VaultClient } from './client/vault/types'
-import { NotifierService, NotifyResponse } from './notifier.service'
+import { NotifierService, NotifyParams, NotifyResponse } from './notifier.service'
+import { globFromList } from './util'
 
 const CMD_DRY_RUN = 'db migrate dry-run'
 const CMD_DRY_RUN_JIRA = 'db migrate jira'
 const CMD_APPLY = 'db migrate'
+const NO_MIGRATION_AVAILABLE = '1No migrations available'
 
 export default class MigrationService {
   #ghClient: GHClient
@@ -59,6 +71,66 @@ export default class MigrationService {
     }
   }
 
+  async #validateChangedFiles(
+    pullRequest: gha.PullRequest,
+    migrationConfigList: MigrationConfig[]
+  ): Promise<ChangedFileValidationError | undefined> {
+    const changedFiles = await this.#ghClient.getChangedFiles(pullRequest.number)
+    let hasMigrationVersionFile = false
+    if (changedFiles.length === 0) {
+      return { errMsg: 'No files changed', unmatched: [], migrationAvailable: hasMigrationVersionFile }
+    }
+
+    const { matched, unmatched } = globFromList(
+      migrationConfigList.map(migrationConfig => getRelativePathForDbDirectory(migrationConfig.dir)),
+      changedFiles
+    )
+
+    for (let idx = 0; idx < matched.length; idx++) {
+      const matchedFiles = matched[idx].filter(file => hasExtension(file, '.sql'))
+
+      migrationConfigList[idx].lintLatestFiles = matchedFiles.length
+      hasMigrationVersionFile = hasMigrationVersionFile || matchedFiles.length > 0
+    }
+
+    if (hasMigrationVersionFile === false) {
+      core.debug('No migrations files found')
+      return { errMsg: NO_MIGRATION_AVAILABLE, unmatched: [], migrationAvailable: hasMigrationVersionFile }
+    }
+
+    const unmatchedFilesToConsider = unmatched.filter(file => {
+      // "./db.migration.json" to "db.migration.json"
+      if (file === path.relative('.', this.#config.configFileName) || file === 'Makefile') {
+        return false
+      }
+
+      if (hasExtensions(file, ['.yml', '.yaml', '.sql'])) {
+        return false
+      }
+
+      return true
+    })
+    if (unmatchedFilesToConsider.length > 0) {
+      core.error(`Found unwanted files: ${JSON.stringify(unmatchedFilesToConsider, null, 2)}`)
+      return {
+        errMsg: 'Unwanted files found',
+        migrationAvailable: hasMigrationVersionFile,
+        unmatched: unmatchedFilesToConsider
+      }
+    }
+  }
+
+  async #processChangedFileValidationError(
+    validationErr: ChangedFileValidationError,
+    pr: gha.PullRequest,
+    migrationMeta: MigrationMeta
+  ): Promise<void> {
+    await this.#buildCommentInfo(true, pr, migrationMeta, {
+      migrationRunListResponse: { migrationAvailable: false, executionResponseList: [] },
+      changedFileValidation: validationErr
+    })
+  }
+
   /**
    * Add label if not present
    *
@@ -66,17 +138,41 @@ export default class MigrationService {
    */
   async #processPullRequest(event: gha.ContextPullRequest): Promise<RunMigrationResult> {
     const { payload } = event
-    const result = await this.#runMigrationForDryRun(payload.pull_request, {
+    const pr = payload.pull_request
+    const migrationMeta: MigrationMeta = {
       eventName: event.eventName,
       actionName: payload.action,
       source: 'pr',
-      triggeredBy: payload.pull_request.user,
+      triggeredBy: pr.user,
       ensureJiraTicket: true,
       lintRequired: true
-    })
+    }
+    const migrationConfigList = await buildMigrationConfigList(
+      this.#config.baseDirectory,
+      this.#config.databases,
+      this.#config.devDBUrl,
+      {},
+      false
+    )
+
+    const validationResult = await this.#validateChangedFiles(pr, migrationConfigList)
+    if (validationResult) {
+      if (validationResult.migrationAvailable) {
+        core.setFailed(validationResult.errMsg)
+        await this.#processChangedFileValidationError(validationResult, pr, migrationMeta)
+      }
+      return {
+        executionResponseList: [],
+        migrationAvailable: validationResult.migrationAvailable,
+        ignore: true
+      }
+    }
+
+    // validate files
+    const result = await this.#runMigrationForDryRun(pr, migrationMeta, migrationConfigList)
 
     if (result.migrationAvailable) {
-      await this.#ensureLabels(payload.pull_request, result.jiraIssue)
+      await this.#ensureLabels(pr, result.jiraIssue)
     }
     return result
   }
@@ -127,9 +223,7 @@ export default class MigrationService {
     dryRun: boolean,
     pullRequest: gha.PullRequest,
     migrationMeta: MigrationMeta,
-    migrationRunListResponse: MigrationRunListResponse,
-    lintResponseList?: MigrationLintResponse,
-    jiraIssue?: JiraIssue | null | undefined
+    params: NotifyParams
   ): Promise<NotifyResponse> {
     const notifier = new NotifierService(
       dryRun,
@@ -139,7 +233,7 @@ export default class MigrationService {
       this.#ghClient,
       this.#jiraClient
     )
-    return await notifier.notify(migrationRunListResponse, lintResponseList, jiraIssue)
+    return await notifier.notify(params)
   }
 
   /**
@@ -197,7 +291,7 @@ export default class MigrationService {
       return `JIRA issue ${jiraIssue.key} is not resolved yet ${jiraIssue.fields.resolution?.name || 'NA'}`
     }
     // DRI Approvals missing
-    const missingDRIApprovals = jiraConfig.fields.driApprovals.filter(field => {
+    const missingDRIApprovals = (jiraConfig.fields.driApprovals || []).filter(field => {
       if (!jiraIssue.fields[field]) {
         return true
       }
@@ -222,7 +316,7 @@ export default class MigrationService {
 
     const [migrationConfigList, jiraIssue] = await Promise.all([
       // Build configuration
-      buildMigrationConfigList(this.#config.baseDirectory, this.#config.databases, secretMap, this.#config.devDBUrl),
+      buildMigrationConfigList(this.#config.baseDirectory, this.#config.databases, this.#config.devDBUrl, secretMap),
       // Fetch JIRA Issue
       this.#jiraClient?.findIssue(pullRequest.html_url) ?? Promise.resolve(undefined)
     ])
@@ -240,7 +334,9 @@ export default class MigrationService {
 
     if (failureMsg) {
       core.setFailed(failureMsg)
-      await buildCommentInfoFn({ executionResponseList: [], migrationAvailable: false, errMsg: failureMsg })
+      await buildCommentInfoFn({
+        migrationRunListResponse: { executionResponseList: [], migrationAvailable: false, errMsg: failureMsg }
+      })
       return null
     }
 
@@ -254,14 +350,14 @@ export default class MigrationService {
 
     if (migrationRunListResponse.errMsg) {
       result.ignore = true
-      await buildCommentInfoFn(migrationRunListResponse)
+      await buildCommentInfoFn({ migrationRunListResponse })
       core.setFailed(migrationRunListResponse.errMsg)
     } else if (migrationRunListResponse.migrationAvailable === false) {
       result.ignore = true
-      migrationRunListResponse.errMsg = 'No migrations available'
+      migrationRunListResponse.errMsg = NO_MIGRATION_AVAILABLE
       if (pullRequest.labels.some(label => label.name === this.#config.prLabel)) {
-        await buildCommentInfoFn(migrationRunListResponse)
-        core.debug('No migrations available')
+        await buildCommentInfoFn({ migrationRunListResponse })
+        core.debug(NO_MIGRATION_AVAILABLE)
       }
     }
 
@@ -277,7 +373,7 @@ export default class MigrationService {
 
     core.debug(`Ran Successfully: ${successMsg}`)
 
-    await buildCommentInfoFn(migrationRunListResponse)
+    await buildCommentInfoFn({ migrationRunListResponse })
 
     return result
   }
@@ -289,19 +385,44 @@ export default class MigrationService {
     return await this.#ghClient.getPullRequestApprovedUserList(prNumber)
   }
 
-  async #runMigrationForDryRun(pr: gha.PullRequest, migrationMeta: MigrationMeta): Promise<RunMigrationResult> {
+  async #runMigrationForDryRun(
+    pr: gha.PullRequest,
+    migrationMeta: MigrationMeta,
+    migrationConfigList?: MigrationConfig[]
+  ): Promise<RunMigrationResult> {
     core.info(`fn:runMigrationForDryRun PR#${pr.number}, Dry Run: true, Source=${migrationMeta.source}`)
 
-    const migrationConfigList = await buildMigrationConfigList(
-      this.#config.baseDirectory,
-      this.#config.databases,
-      await this.secretClient.getSecrets(this.#config.dbSecretNameList),
-      this.#config.devDBUrl
-    )
+    if (migrationConfigList) {
+      await hydrateMigrationConfigList(
+        migrationConfigList,
+        this.#config.databases,
+        await this.secretClient.getSecrets(this.#config.dbSecretNameList)
+      )
+    } else {
+      migrationConfigList = await buildMigrationConfigList(
+        this.#config.baseDirectory,
+        this.#config.databases,
+        this.#config.devDBUrl,
+        await this.secretClient.getSecrets(this.#config.dbSecretNameList)
+      )
+    }
 
     let lintResponseList: MigrationLintResponse | undefined
     if (migrationMeta.lintRequired) {
       lintResponseList = await runLintFromList(migrationConfigList)
+    }
+
+    if (lintResponseList?.errMsg) {
+      core.setFailed(lintResponseList.errMsg)
+      await this.#buildCommentInfo(true, pr, migrationMeta, {
+        migrationRunListResponse: { executionResponseList: [], migrationAvailable: false },
+        lintResponseList
+      })
+      return {
+        executionResponseList: [],
+        migrationAvailable: false,
+        ignore: true
+      }
     }
 
     const migrationRunListResponse = await runMigrationFromList(migrationConfigList, true)
@@ -318,13 +439,14 @@ export default class MigrationService {
       }
     }
 
-    const { jiraIssue } = await this.#buildCommentInfo(
-      true,
-      pr,
-      migrationMeta,
+    if (migrationRunListResponse.errMsg) {
+      core.setFailed(migrationRunListResponse.errMsg)
+    }
+
+    const { jiraIssue } = await this.#buildCommentInfo(true, pr, migrationMeta, {
       migrationRunListResponse,
       lintResponseList
-    )
+    })
 
     return {
       executionResponseList: migrationRunListResponse.executionResponseList,

@@ -1,4 +1,6 @@
 import * as github from '@actions/github'
+import * as core from '@actions/core'
+
 import GHClient from './client/github'
 import MigrationService from './migration.service'
 import buildConfig from './config'
@@ -27,7 +29,6 @@ export async function run(): Promise<void> {
       event.payload.repository.name
     )
 
-    config.baseBranch = event.payload.repository.default_branch
     await migrator.mapIssueToPullRequest(event.payload.issue)
   }
 
@@ -42,7 +43,7 @@ export async function run(): Promise<void> {
 
   config.baseBranch = event.payload.repository.default_branch
 
-  console.debug(
+  core.debug(
     `Event: ${eventName}, Action: ${event.payload.action} on baseBranch=${config.baseBranch}, canProcess=${process}`
   )
 

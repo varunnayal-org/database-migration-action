@@ -71,7 +71,10 @@ export async function dataDumper(): Promise<void> {
 
         GITHUB_EVENT_PATH: process.env.GITHUB_EVENT_PATH,
 
-        GITHUB_ACTION_PATH: process.env.GITHUB_ACTION_PATH
+        GITHUB_ACTION_PATH: process.env.GITHUB_ACTION_PATH,
+
+        PR_CHANGED_FILES: process.env.PR_CHANGED_FILES,
+        PR_DETAILS: process.env.PR_DETAILS
       }
     }
 

@@ -167,9 +167,9 @@ describe('runUsingAtlas', () => {
       return Promise.reject(new Error(errMsg))
     })
 
-    expect(atlas.run(migrationConfig)).rejects.toThrow(errMsg)
+    await expect(atlas.run(migrationConfig)).rejects.toThrow(errMsg)
 
-    expect(utilExecFn).toHaveBeenCalledTimes(1)
+    expect(utilExecFn).toHaveBeenCalledTimes(2)
     expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
       'migrate',
       'hash',
