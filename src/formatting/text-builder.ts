@@ -1,14 +1,23 @@
-import { Formatter, LintExecutionResponse, MigrationRunListResponse } from '../types'
+import { Formatter, ITextBuilder, LintExecutionResponse, MigrationRunListResponse } from '../types'
 import { readableDate } from '../util'
 import { Platform, formatterMap } from './formatters'
 
 export class TextBuilder {
-  constructor(
-    private dryRun: boolean,
-    private prLink: string,
-    private repoLink: string,
-    private dbDirList: string[]
-  ) {}
+  dryRun: boolean
+  prLink: string
+  repoLink: string
+  dbDirList: string[]
+  platform: Record<Platform, ITextBuilder>
+  constructor(dryRun: boolean, prLink: string, repoLink: string, dbDirList: string[]) {
+    this.dryRun = dryRun
+    this.prLink = prLink
+    this.repoLink = repoLink
+    this.dbDirList = dbDirList
+    this.platform = {
+      github: new GithubTextBuilder(this),
+      jira: new JiraTextBuilder(this)
+    }
+  }
 
   #buildTableAndSQLStatement(fmt: Formatter, response: MigrationRunListResponse): [string, string] {
     let sqlStatementString = ''
@@ -72,7 +81,7 @@ export class TextBuilder {
    * @param formatter - The Formatter object used for formatting.
    * @returns An array containing the comment message and context string.
    */
-  #build(response: MigrationRunListResponse, formatter: Formatter): string {
+  build(response: MigrationRunListResponse, formatter: Formatter): string {
     const printMsgPrefix = this.dryRun ? '[DryRun]Migrations' : 'Migrations'
     let printStatus = 'successful'
     let printEmoji = formatter.success
@@ -111,89 +120,96 @@ export class TextBuilder {
     return lines.join('\n')
   }
 
-  jira(response: MigrationRunListResponse): string {
-    return this.#build(response, formatterMap.jira)
-  }
-
-  github(response: MigrationRunListResponse): string {
-    return this.#build(response, formatterMap.github)
-  }
-
-  #buildLintMessage(lintResults: LintExecutionResponse[], fmt: Formatter): string {
-    const nonTableErrors: string[] = []
-    const tableRowsStr = lintResults.reduce<string>((tableRows, lintResult) => {
-      // No error, no need to show
-      if (!lintResult.getFirstError()) {
-        return tableRows
-      }
-
-      if (lintResult.getFileLintResults().length === 0) {
-        nonTableErrors.push(
-          `${fmt.rSep}${lintResult.getMigrationDirectory()}${fmt.rSep}${lintResult.getFirstError() as string}${
-            fmt.rSep
-          }`
-        )
-      }
-
-      const rowString: string[] = []
-      for (const fileLintResult of lintResult.getFileLintResults()) {
-        for (const lintError of fileLintResult.getDiagnostics()) {
-          const rowData = [
-            // filename
-            fileLintResult.getName(),
-            // error
-            fmt.cEsc(lintError.getMessage()),
-            // error code
-            lintError.getHelpUrl()
-              ? fmt.linkBuilder(lintError.getErrorCode(), lintError.getHelpUrl())
-              : lintError.getErrorCode(),
-            // position
-            lintError.getPosition() >= 0 ? lintError.getPosition() : ''
-          ]
-
-          rowString.push(`${fmt.rSep}${rowData.join(fmt.rSep)}${fmt.rSep}`)
+  buildLintMessage(lintResults: LintExecutionResponse[], fmt: Formatter): string {
+    const textList = lintResults.reduce<string[]>(
+      (textAcc, lintResult) => {
+        if (!lintResult.getFirstError()) {
+          return textAcc
         }
-      }
 
-      if (rowString.length === 0) {
-        return tableRows
-      }
+        textAcc.push(`*Directory*: \`${lintResult.getMigrationDirectory()}\``)
 
-      return `${tableRows}\n${rowString.join('\n')}\n`
-    }, '')
-    let msg = `\n**Lint Errors**\n`
-    if (tableRowsStr.length > 0) {
-      msg += `${fmt.headerBuilder(['File', 'Error', 'Error Code', 'Position'])}${tableRowsStr}\n`
-    }
-    if (nonTableErrors.length > 0) {
-      msg += `\n**Directory Errors**:\n${fmt.headerBuilder(['Migration Directory', 'Error'])}\n${nonTableErrors.join(
-        '\n'
-      )}\n`
-    }
-    return msg
-  }
+        if (lintResult.getFileLintResults().length === 0) {
+          textAcc.push(`: ${lintResult.getFirstError() as string}`)
+          return textAcc
+        }
 
-  githubLint(lintResults: LintExecutionResponse[]): string {
-    return this.#buildLintMessage(lintResults, formatterMap.github)
-  }
+        textAcc.push(fmt.headerBuilder(['Skipped', 'File', 'Error', 'Error Code', 'Position']))
 
-  jiraLint(lintResults: LintExecutionResponse[]): string {
-    return this.#buildLintMessage(lintResults, formatterMap.jira)
+        for (const fileLintResult of lintResult.getFileLintResults()) {
+          for (const lintError of fileLintResult.getDiagnostics()) {
+            const rowData = [
+              // Error skipped?
+              lintError.isSkipped() ? fmt.success : fmt.failure,
+              // filename
+              fileLintResult.getName(),
+              // error
+              fmt.cEsc(lintError.getMessage()),
+              // error code
+              lintError.getHelpUrl()
+                ? fmt.linkBuilder(lintError.getErrorCode(), lintError.getHelpUrl())
+                : lintError.getErrorCode(),
+              // position
+              lintError.getPosition() >= 0 ? lintError.getPosition() : ''
+            ]
+
+            textAcc.push(`${fmt.rSep}${rowData.join(fmt.rSep)}${fmt.rSep}`)
+          }
+        }
+        textAcc.push('')
+        return textAcc
+      },
+      ['**Lint Errors**']
+    )
+
+    return textList.join('\n')
   }
 
   getFormatter(name: Platform): Formatter {
     return formatterMap[name]
   }
+}
 
-  jiraDescription(comment: string): string {
+class JiraTextBuilder implements ITextBuilder {
+  constructor(private textBuilder: TextBuilder) {}
+  title(prefix: string): string {
+    return `${prefix}: ${this.textBuilder.prLink}`
+  }
+
+  description(comment: string): string {
     return `
-    PR Link: ${this.prLink}
+PR Link: ${this.textBuilder.prLink}
 
-    ${comment}
+${comment}
 `
   }
 
-  jiraTitle(prefix: string): string {
-    return `${prefix}: ${this.prLink}`
+  lint(lintResults: LintExecutionResponse[]): string {
+    return this.textBuilder.buildLintMessage(lintResults, formatterMap.jira)
+  }
+
+  run(result: MigrationRunListResponse): string {
+    return this.textBuilder.build(result, formatterMap.jira)
+  }
+}
+
+class GithubTextBuilder implements ITextBuilder {
+  constructor(private textBuilder: TextBuilder) {}
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  title(prefix: string): string {
+    throw new Error('Method not implemented.')
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  description(comment: string): string {
+    throw new Error('Method not implemented.')
+  }
+
+  lint(lintResults: LintExecutionResponse[]): string {
+    return this.textBuilder.buildLintMessage(lintResults, formatterMap.github)
+  }
+
+  run(result: MigrationRunListResponse): string {
+    return this.textBuilder.build(result, formatterMap.github)
   }
 }

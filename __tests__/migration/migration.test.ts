@@ -79,11 +79,14 @@ const getVaultKeyStore = (...names: string[]): SecretMap =>
 const getExpectedMigrationConfigList = (
   dir = '.',
   databaseUrl = 'test',
+  baseDir = 'migrations',
   schema = 'public',
   devUrl = 'test'
 ): MigrationConfig[] => [
   {
     dir: path.join(migration.TEMP_DIR_FOR_MIGRATION, dir),
+    originalDir: path.join(baseDir, dir),
+    relativeDir: path.join(baseDir, dir),
     databaseUrl,
     schema,
     baseline: undefined,
@@ -91,14 +94,6 @@ const getExpectedMigrationConfigList = (
     devUrl
   }
 ]
-
-class MyError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = this.constructor.name
-    this.stack = ''
-  }
-}
 
 describe('buildMigrationConfigList', () => {
   const devDBUrl = 'test'
@@ -156,8 +151,8 @@ describe('buildMigrationConfigList', () => {
     beforeEach(async () => {
       dbs = [getDB('db1', 'db1_key'), getDB('db2', 'db2_key')]
       expectedMigrationConfigList = [
-        ...getExpectedMigrationConfigList('db1', 'db1_credentials'),
-        ...getExpectedMigrationConfigList('db2', 'db2_credentials')
+        ...getExpectedMigrationConfigList('db1', 'db1_credentials', 'multi_db_dir'),
+        ...getExpectedMigrationConfigList('db2', 'db2_credentials', 'multi_db_dir')
       ]
       vaultKeyStore = {
         db1_key: 'db1_credentials',
@@ -314,14 +309,14 @@ describe('runMigrationFromList', () => {
     let migrationConfigList: MigrationConfig[]
     beforeEach(async () => {
       expectedMigrationConfigList = [
-        ...getExpectedMigrationConfigList('db1', 'db1_credentials'),
-        ...getExpectedMigrationConfigList('db2', 'db2_credentials'),
-        ...getExpectedMigrationConfigList('db3', 'db3_credentials')
+        ...getExpectedMigrationConfigList('db1', 'db1_credentials', 'multi_db_dir'),
+        ...getExpectedMigrationConfigList('db2', 'db2_credentials', 'multi_db_dir'),
+        ...getExpectedMigrationConfigList('db3', 'db3_credentials', 'multi_db_dir')
       ]
       migrationConfigList = [
-        ...getExpectedMigrationConfigList('db1', 'db1_credentials'),
-        ...getExpectedMigrationConfigList('db2', 'db2_credentials'),
-        ...getExpectedMigrationConfigList('db3', 'db3_credentials')
+        ...getExpectedMigrationConfigList('db1', 'db1_credentials', 'multi_db_dir'),
+        ...getExpectedMigrationConfigList('db2', 'db2_credentials', 'multi_db_dir'),
+        ...getExpectedMigrationConfigList('db3', 'db3_credentials', 'multi_db_dir')
       ]
     })
 
@@ -376,8 +371,7 @@ describe('runMigrationFromList', () => {
           AtlasMigrationExecutionResponse.build(JSON.stringify(getBaseExecutionListForDB3()))
         ]
       }
-      // console.log(response)
-      // console.log(expectedResponse)
+
       expect(response).toEqual(expectedResponse)
 
       expect(atlasRunFn).toHaveBeenCalledTimes(expectedMigrationConfigList.length)
@@ -429,12 +423,7 @@ describe('runMigrationFromList', () => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const atlasRunFn = atlasRun.mockImplementation(async (_: MigrationConfig) => {
         atlasRunFnCallCount++
-        if (atlasRunFnCallCount !== 2) {
-          return Promise.resolve(
-            AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=${atlasRunFnCallCount}`)
-          )
-        }
-        return Promise.reject(new MyError(`Atlas error for idx=${atlasRunFnCallCount}`))
+        return AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=${atlasRunFnCallCount}`)
       })
 
       const response = await migration.runMigrationFromList(migrationConfigList, dryRun)
@@ -446,7 +435,7 @@ describe('runMigrationFromList', () => {
           AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=2`),
           AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=3`)
         ],
-        errMsg: 'Atlas error for idx=2'
+        errMsg: 'Atlas error for idx=1'
       }
 
       expect(response).toEqual(expectedResponse)
@@ -467,12 +456,10 @@ describe('runMigrationFromList', () => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const atlasRunFn = atlasRun.mockImplementation(async (_: MigrationConfig) => {
         if (++atlasRunFnCallCount % 2 === 1) {
-          return Promise.reject(new MyError(`Atlas error for idx=${atlasRunFnCallCount - 1}`))
+          return AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=${atlasRunFnCallCount - 1}`)
         }
         return getAtlasSuccessfulRunResponse()
       })
-
-      const response = await migration.runMigrationFromList(migrationConfigList, dryRun)
 
       const expectedResponse: MigrationRunListResponse = {
         migrationAvailable: true,
@@ -481,8 +468,10 @@ describe('runMigrationFromList', () => {
           getAtlasSuccessfulRunResponse(),
           AtlasMigrationExecutionResponse.fromError(`Atlas error for idx=2`)
         ],
-        errMsg: 'Atlas error for idx=2'
+        errMsg: 'Atlas error for idx=0'
       }
+
+      const response = await migration.runMigrationFromList(migrationConfigList, dryRun)
 
       expect(response).toEqual(expectedResponse)
 

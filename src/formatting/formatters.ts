@@ -9,6 +9,7 @@ export const formatterMap: Record<Platform, Formatter> = {
   github: {
     success: '✅',
     failure: '❌',
+    skip: ':open_mouth:',
     hSep: '|',
     rSep: '|',
     tableCodeBlockAllowed: false,
@@ -35,6 +36,7 @@ export const formatterMap: Record<Platform, Formatter> = {
   jira: {
     success: '(/)',
     failure: '(x)',
+    skip: '(!)',
     hSep: '||',
     rSep: '|',
     tableCodeBlockAllowed: true,

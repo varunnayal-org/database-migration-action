@@ -15,6 +15,8 @@ const getExpectedMigrationConfigList = (
   devUrl = 'test'
 ): MigrationConfig => ({
   dir: path.join(migration.TEMP_DIR_FOR_MIGRATION, dir),
+  relativeDir: path.join(migration.TEMP_DIR_FOR_MIGRATION, dir),
+  originalDir: path.join(migration.TEMP_DIR_FOR_MIGRATION, dir),
   databaseUrl: dbUrlKey,
   schema,
   baseline: '',
@@ -160,15 +162,15 @@ describe('runUsingAtlas', () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const utilExecFn = utilExec.mockImplementation(async (cmd: string, args: string[]) => {
       utilExecRunCount++
-      console.log(cmd, args)
       if (utilExecRunCount === 1) {
         return `${cmd} ${args.join(' ')}`
       }
       return Promise.reject(new Error(errMsg))
     })
 
-    await expect(atlas.run(migrationConfig)).rejects.toThrow(errMsg)
+    const response = await atlas.run(migrationConfig)
 
+    expect(response).toEqual(AtlasMigrationExecutionResponse.fromError(errMsg))
     expect(utilExecFn).toHaveBeenCalledTimes(2)
     expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
       'migrate',

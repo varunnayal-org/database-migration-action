@@ -19,10 +19,12 @@ import {
   MigrationMeta,
   MigrationLintResponse,
   MigrationConfig,
-  ChangedFileValidationError
+  ChangedFileValidationError,
+  NotifyParams,
+  NotifyResponse
 } from './types'
 import { VaultClient } from './client/vault/types'
-import { NotifierService, NotifyParams, NotifyResponse } from './notifier.service'
+import { NotifierService } from './notifier.service'
 import { globFromList } from './util'
 
 const CMD_DRY_RUN = 'db migrate dry-run'
@@ -82,7 +84,7 @@ export default class MigrationService {
     }
 
     const { matched, unmatched } = globFromList(
-      migrationConfigList.map(migrationConfig => getRelativePathForDbDirectory(migrationConfig.dir)),
+      migrationConfigList.map(migrationConfig => getRelativePathForDbDirectory(migrationConfig.originalDir)),
       changedFiles
     )
 
@@ -127,7 +129,8 @@ export default class MigrationService {
   ): Promise<void> {
     await this.#buildCommentInfo(true, pr, migrationMeta, {
       migrationRunListResponse: { migrationAvailable: false, executionResponseList: [] },
-      changedFileValidation: validationErr
+      changedFileValidation: validationErr,
+      closePR: true
     })
   }
 
@@ -385,6 +388,13 @@ export default class MigrationService {
     return await this.#ghClient.getPullRequestApprovedUserList(prNumber)
   }
 
+  #getLintErrorCodesThatCanBeSkipped(labels: gha.Label[]): string[] {
+    return labels
+      .filter(label => label.name.startsWith(this.#config.lintErrorSkipLabelPrefix))
+      .map(label => label.name.split(this.#config.lintErrorSkipLabelPrefix)[1])
+      .filter(Boolean)
+  }
+
   async #runMigrationForDryRun(
     pr: gha.PullRequest,
     migrationMeta: MigrationMeta,
@@ -409,20 +419,7 @@ export default class MigrationService {
 
     let lintResponseList: MigrationLintResponse | undefined
     if (migrationMeta.lintRequired) {
-      lintResponseList = await runLintFromList(migrationConfigList)
-    }
-
-    if (lintResponseList?.errMsg) {
-      core.setFailed(lintResponseList.errMsg)
-      await this.#buildCommentInfo(true, pr, migrationMeta, {
-        migrationRunListResponse: { executionResponseList: [], migrationAvailable: false },
-        lintResponseList
-      })
-      return {
-        executionResponseList: [],
-        migrationAvailable: false,
-        ignore: true
-      }
+      lintResponseList = await runLintFromList(migrationConfigList, this.#getLintErrorCodesThatCanBeSkipped(pr.labels)) // codes like: ['PG103', 'BC102', 'DS103']
     }
 
     const migrationRunListResponse = await runMigrationFromList(migrationConfigList, true)
@@ -439,13 +436,16 @@ export default class MigrationService {
       }
     }
 
-    if (migrationRunListResponse.errMsg) {
+    if (lintResponseList?.errMsg && lintResponseList.canSkipAllErrors === false) {
+      core.setFailed(lintResponseList.errMsg)
+    } else if (migrationRunListResponse.errMsg) {
       core.setFailed(migrationRunListResponse.errMsg)
     }
 
     const { jiraIssue } = await this.#buildCommentInfo(true, pr, migrationMeta, {
       migrationRunListResponse,
-      lintResponseList
+      lintResponseList,
+      addMigrationRunResponseForLint: true
     })
 
     return {

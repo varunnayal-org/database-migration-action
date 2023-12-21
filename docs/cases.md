@@ -1,6 +1,7 @@
 # Cases
 
 - [Cases](#cases)
+  - [Auto close PR](#auto-close-pr)
   - [Out of order Execution](#out-of-order-execution)
   - [Lock and timeouts](#lock-and-timeouts)
   - [Drop index concurrently issue](#drop-index-concurrently-issue)
@@ -22,6 +23,15 @@
   - [Long Running Migrations](#long-running-migrations)
     - [Post killing migration statement](#post-killing-migration-statement)
   - [Issues](#issues)
+
+## Auto close PR
+
+IF the PR contains files that should not be a part of PR, then this action automatically closes the PR.
+Following are the files allowed in PR
+
+- Any `sql`, `yml`, `yaml` file
+- DB Migration configuration file provided in action input or defaults to `./db.migration.json`
+- `Makefile`
 
 ## Out of order Execution
 
@@ -103,7 +113,7 @@ Error: sql/migrate: connected database is not clean: found 2 tables in schema "p
 
 ### Non Concurrent
 
-[TODO] This won't work if we are using linting.
+This won't work if we are using linting.
 
 ```sql
 CREATE UNIQUE INDEX "idx_email" ON "public"."user" ("email");

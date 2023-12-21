@@ -33,62 +33,62 @@ function getAtlasHCLFile(): [string, string] {
   return [ATLAS_CONFIG_FILE_NAME, atlasHCL]
 }
 
-async function lint(migrationConfig: MigrationConfig): Promise<AtlasLintResponse> {
-  await hash(migrationConfig.dir)
-  const lintArgs = [
-    'migrate',
-    'lint',
-    '--dir',
-    getDirArg(migrationConfig.dir),
-    '-c',
-    getAtlasHCLFileArgs(migrationConfig.dir),
-    '--format',
-    '"{{ json .Files }}"',
-    '--latest',
-    `${migrationConfig.lintLatestFiles || 10000}`,
-    '--dev-url',
-    migrationConfig.devUrl
-  ]
+async function lint(migrationConfig: MigrationConfig, skipErrorCodeList: string[]): Promise<AtlasLintResponse> {
   try {
+    await hash(migrationConfig.dir)
+    const lintArgs = [
+      'migrate',
+      'lint',
+      '--dir',
+      getDirArg(migrationConfig.dir),
+      '-c',
+      getAtlasHCLFileArgs(migrationConfig.dir),
+      '--format',
+      '"{{ json .Files }}"',
+      '--latest',
+      `${migrationConfig.lintLatestFiles || 10000}`,
+      '--dev-url',
+      migrationConfig.devUrl
+    ]
     core.debug(`Linting for directory ${migrationConfig.dir}`)
     const response = await util.exec('atlas', lintArgs)
-    return AtlasLintResponse.build(response, migrationConfig.dir)
+    return AtlasLintResponse.build(response, migrationConfig.relativeDir, skipErrorCodeList)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (ex: any) {
     // Happens when some migrations were applied, but last one has failed
     if (ex.message.startsWith('[')) {
-      return AtlasLintResponse.build(ex.message, migrationConfig.dir)
+      return AtlasLintResponse.build(ex.message, migrationConfig.relativeDir, skipErrorCodeList)
     }
-    throw ex
+    core.info(`ErrorLint[tmp_dir=${migrationConfig.relativeDir}]: ${ex} ${ex.stack}`)
+    return AtlasLintResponse.fromError(ex.message, migrationConfig.relativeDir)
   }
 }
 
 async function run(migrationConfig: MigrationConfig): Promise<MigrationExecutionResponse> {
-  // Generate hash required step as migrate apply need hash
-  await hash(migrationConfig.dir)
-
-  const migrateApplyArgs = [
-    'migrate',
-    'apply',
-    '--dir',
-    getDirArg(migrationConfig.dir),
-    '--format',
-    '"{{ json .Applied }}"',
-    '--revisions-schema',
-    migrationConfig.schema
-  ]
-
-  if (migrationConfig.dryRun) {
-    migrateApplyArgs.push('--dry-run')
-  }
-  if (migrationConfig.baseline) {
-    migrateApplyArgs.push('--baseline', migrationConfig.baseline.toString())
-  }
-
-  // Ensure URL field is at the end so that it doesn't get printed in the logs
-  migrateApplyArgs.push('--url', migrationConfig.databaseUrl)
-
   try {
+    // Generate hash required step as migrate apply need hash
+    await hash(migrationConfig.dir)
+
+    const migrateApplyArgs = [
+      'migrate',
+      'apply',
+      '--dir',
+      getDirArg(migrationConfig.dir),
+      '--format',
+      '"{{ json .Applied }}"',
+      '--revisions-schema',
+      migrationConfig.schema
+    ]
+
+    if (migrationConfig.dryRun) {
+      migrateApplyArgs.push('--dry-run')
+    }
+    if (migrationConfig.baseline) {
+      migrateApplyArgs.push('--baseline', migrationConfig.baseline.toString())
+    }
+    // Ensure URL field is at the end so that it doesn't get printed in the logs
+    migrateApplyArgs.push('--url', migrationConfig.databaseUrl)
+
     core.debug(`Migrating for directory ${migrationConfig.dir}`)
     const response = await util.exec('atlas', migrateApplyArgs)
     return AtlasMigrationExecutionResponse.build(response)
@@ -98,7 +98,8 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
     if (ex.message.startsWith('[')) {
       return AtlasMigrationExecutionResponse.build(ex.message)
     }
-    throw ex
+    core.info(`ErrorApply[tmp_dir=${migrationConfig.dir}]: ${ex} ${ex.stack}`)
+    return AtlasMigrationExecutionResponse.fromError(ex.message)
   }
 }
 

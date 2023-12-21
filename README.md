@@ -1,6 +1,6 @@
 # DB Migration Action
 
-[![GitHub Super-Linter](https://github.com/varunnayal-org/database-migration-action/actions/workflows/linter.yml/badge.svg)](https://github.com/super-linter/super-linter) ![CI](https://github.com/varunnayal-org/database-migration-action/actions/workflows/ci.yml/badge.svg) [![Check dist/](https://github.com/varunnayal-org/database-migration-action/actions/workflows/check-dist.yml/badge.svg)](https://github.com/varunnayal-org/database-migration-action/actions/workflows/check-dist.yml) [![CodeQL](https://github.com/varunnayal-org/database-migration-action/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/varunnayal-org/database-migration-action/actions/workflows/codeql-analysis.yml) [![Coverage](./badges/coverage.svg)](./badges/coverage.svg)
+[![GitHub Super-Linter](https://github.com/varunnayal-org/database-migration-action/actions/workflows/linter.yml/badge.svg)](https://github.com/super-linter/super-linter) ![CI](https://github.com/varunnayal-org/database-migration-action/actions/workflows/ci.yml/badge.svg) [![Check dist/](https://github.com/varunnayal-org/database-migration-action/actions/workflows/check-dist.yml/badge.svg)](https://github.com/varunnayal-org/database-migration-action/actions/workflows/check-dist.yml) [![CodeQL](https://github.com/varunnayal-org/database-migration-action/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/varunnayal-org/database-migration-action/actions/workflows/codeql-analysis.yml)[![Coverage](./badges/coverage.svg)](./badges/coverage.svg)
 
 Flow diagram: [flow.puml](./docs/diagrams/flow.puml)
 
@@ -28,7 +28,7 @@ Flow diagram: [flow.puml](./docs/diagrams/flow.puml)
 ### Action Items
 
 - [x] JIRA integration for approval
-- [ ] Do not allow drop commands (Mention in Dev SOP). Can we use linters?
+- [x] Do not allow drop commands (Mention in Dev SOP). Can we use linters?
   - Can be handled using `atlas.hcl` file with configuration([issue](./docs/cases.md#drop-index-concurrently-issue))
 
     ```hcl
@@ -39,17 +39,20 @@ Flow diagram: [flow.puml](./docs/diagrams/flow.puml)
     }
     ```
 
+  - [x] Allow skipping of certain lint rules per PR basis: check [lint bypass checks](./docs/linting.md#bypass-checks)
 - [ ] DBA SOP
-- [ ] Dry run on actual schema replica
-  - [ ] Can we use Postgres service
+- [x] Dry run on actual schema replica
+  - [x] Can we use Postgres service
 - [ ] How to kill long running migrations
 - [ ] How to capture database drifts
 - [ ] How can DBA run migrations manually instead of commands? Write an SOP for the same. How will be sync migration table?
-- [ ] A separate PR for migrations. Reject/Close PR if it contains business logic files
+- [x] A separate PR for migrations. Close PR if it contains business logic files
+  [PR is auto-closed](./docs/cases.md#auto-close-pr)
 - [ ] A PR template for migrations PRs
 - [ ] Questions
   - [ ] Github action times out waiting for a long running migration to execute
   - [ ] Does every file change runs withing a transaction block
+    By default, every file is wrapped withing a transaction block. Use [-- atlas:txmode none](./docs/cases.md#concurrent) to disable transaction mode.
   - [ ] [How to use lock_timeout and statement_timeout](https://postgres.ai/blog/20210923-zero-downtime-postgres-schema-migrations-lock-timeout-and-retries)
 - [ ] Handle [out or order](./docs/cases.md#out-of-order) changes
   - [x] Will be solved in atlas v0.16.x release. Current release is [v0.15.0](https://github.com/ariga/atlas/releases/tag/v0.15.0).

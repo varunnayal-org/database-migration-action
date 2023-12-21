@@ -12,6 +12,7 @@ type GithubClient = ReturnType<typeof getOctokit> // InstanceType<typeof GitHub>
 
 export type IssueCreateCommentResponse = RestEndpointMethodTypes['issues']['createComment']['response']['data']
 export type IssueUpdateCommentResponse = RestEndpointMethodTypes['issues']['updateComment']['response']['data']
+export type PullRequestUpdateResponse = RestEndpointMethodTypes['pulls']['update']['response']['data']
 type IssueAddLabelResponse = RestEndpointMethodTypes['issues']['addLabels']['response']['data']
 type GetUserForTeamsResponse = Record<string, string[]>
 
@@ -259,6 +260,20 @@ class Client {
           file.status === 'added' || file.status === 'modified' || file.status === 'renamed' || file.status === 'copied'
       )
       .map(file => file.filename)
+  }
+
+  async closePR(prNumber: number, body: string): Promise<PullRequestUpdateResponse> {
+    core.debug('Closing PR')
+    return this.#validateAPIResponse(
+      'Close PR',
+      await this.#client.rest.pulls.update({
+        owner: this.#repoOwner,
+        repo: this.#repoName,
+        pull_number: prNumber,
+        state: 'closed',
+        body
+      })
+    )
   }
 }
 

@@ -146,7 +146,8 @@ class AtlasFileDiagnostic implements LintDiagnosticError {
     private message: string, // Files[*].Reports[*].Diagnostics[*].Text
     private errorCode: string, // Files[*].Reports[*].Diagnostics[*].Code
     private errorCodeGroup: string, // Files[*].Reports[*].Text
-    private pos: number // Files[*].Reports[*].Diagnostics[*].Pos
+    private pos: number, // Files[*].Reports[*].Diagnostics[*].Pos
+    private canSkip = false
   ) {}
 
   getMessage(): string {
@@ -164,6 +165,9 @@ class AtlasFileDiagnostic implements LintDiagnosticError {
   getHelpUrl(): string {
     return `https://atlasgo.io/lint/analyzers#${this.errorCode}`
   }
+  isSkipped(): boolean {
+    return this.canSkip
+  }
 }
 
 export class AtlasLintFileErrorDiagnostic implements LintDiagnosticError {
@@ -179,6 +183,9 @@ export class AtlasLintFileErrorDiagnostic implements LintDiagnosticError {
   }
   getHelpUrl(): string {
     return ''
+  }
+  isSkipped(): boolean {
+    return false
   }
 }
 
@@ -217,6 +224,7 @@ export class AtlasLintResponse implements LintExecutionResponse {
   constructor(
     private fileLintResults: LintFileResult[],
     private migrationDir: string,
+    private allSkipped = false,
     private firstError?: string
   ) {}
 
@@ -232,37 +240,53 @@ export class AtlasLintResponse implements LintExecutionResponse {
     return this.migrationDir
   }
 
-  static fromError(error: string, migrationDir: string): AtlasLintResponse {
-    return new AtlasLintResponse([], migrationDir, error)
+  canSkipAllErrors(): boolean {
+    return this.allSkipped
   }
 
-  static build(atlasResponse: string, migrationDir: string): AtlasLintResponse {
+  static fromError(error: string, migrationDir: string): AtlasLintResponse {
+    return new AtlasLintResponse([], migrationDir, false, error)
+  }
+
+  static build(atlasResponse: string, migrationDir: string, skipErrorCodeList: string[]): AtlasLintResponse {
     let firstError: string | undefined
+    let allSkipped = true
     let fileLintResults: LintFileResult[] = []
     try {
       const parsedAtlasResponse = JSON.parse(atlasResponse)
       if (parsedAtlasResponse === null) {
+        allSkipped = false
         throw new Error('null response')
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       fileLintResults = parsedAtlasResponse.map((reportContext: any) => {
         const diagnostics: LintDiagnosticError[] = []
+        const reports = reportContext.Reports || []
 
-        if (reportContext.Error) {
+        if (reportContext.Error && reports.length === 0) {
+          allSkipped = false
           if (!firstError) {
             firstError = reportContext.Error
           }
           diagnostics.push(new AtlasLintFileErrorDiagnostic(reportContext.Error))
         }
 
-        for (const reportJson of reportContext.Reports || []) {
+        for (const reportJson of reports) {
           for (const diagnosticJson of reportJson.Diagnostics || []) {
             if (!firstError) {
               firstError = diagnosticJson.Text
             }
+            const canSkipError = skipErrorCodeList.includes(diagnosticJson.Code)
+            allSkipped = allSkipped && canSkipError
             diagnostics.push(
-              new AtlasFileDiagnostic(diagnosticJson.Text, diagnosticJson.Code, reportJson.Text, diagnosticJson.Pos)
+              new AtlasFileDiagnostic(
+                diagnosticJson.Text,
+                diagnosticJson.Code,
+                reportJson.Text,
+                diagnosticJson.Pos,
+                canSkipError
+              )
             )
           }
         }
@@ -277,10 +301,11 @@ export class AtlasLintResponse implements LintExecutionResponse {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (ex: any) {
       if (atlasResponse && atlasResponse !== 'null') {
+        allSkipped = false
         firstError = atlasResponse
       }
     }
 
-    return new AtlasLintResponse(fileLintResults, migrationDir, firstError)
+    return new AtlasLintResponse(fileLintResults, migrationDir, allSkipped, firstError)
   }
 }

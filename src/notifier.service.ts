@@ -1,24 +1,11 @@
 import * as core from '@actions/core'
-import GHClient, { IssueCreateCommentResponse, IssueUpdateCommentResponse } from './client/github'
+import GHClient from './client/github'
 import JiraClient, { JiraComment, JiraIssue } from './client/jira'
 import { Config } from './config'
 import { TextBuilder } from './formatting/text-builder'
 import { getDirectoryForDb } from './migration/migration'
-import { ChangedFileValidationError, MigrationLintResponse, MigrationMeta, MigrationRunListResponse } from './types'
+import { GithubNotifyResponse, ITextBuilder, MigrationMeta, NotifyParams, NotifyResponse } from './types'
 import * as gha from './types.gha'
-
-export type NotifyResponse = {
-  githubComment: IssueCreateCommentResponse | IssueUpdateCommentResponse
-  jiraIssue?: JiraIssue
-  jiraComment?: JiraComment
-}
-
-export type NotifyParams = {
-  migrationRunListResponse: MigrationRunListResponse
-  lintResponseList?: MigrationLintResponse
-  jiraIssue?: JiraIssue | null | undefined
-  changedFileValidation?: ChangedFileValidationError
-}
 
 export class NotifierService {
   #dryRun: boolean
@@ -44,26 +31,33 @@ export class NotifierService {
     this.#jiraClient = jiraClient
   }
 
-  async buildGithubComment(
-    builder: TextBuilder,
-    params: NotifyParams
-  ): Promise<IssueUpdateCommentResponse | IssueCreateCommentResponse> {
-    let githubSummaryText = ''
+  #buildSummary(builder: ITextBuilder, params: NotifyParams): string {
+    let summaryText = ''
     if (params.changedFileValidation?.errMsg) {
-      githubSummaryText = `**Changed File Validation Error**: ${params.changedFileValidation.errMsg}
+      summaryText = `**Changed File Validation Error**: ${params.changedFileValidation.errMsg}
 Unmatched Files:
 - ${params.changedFileValidation.unmatched.map(f => f).join('\r\n- ')}
 `
     } else if (params.lintResponseList && params.lintResponseList.errMsg) {
-      githubSummaryText = builder.githubLint(params.lintResponseList.lintResponseList)
+      summaryText = builder.lint(params.lintResponseList.lintResponseList)
+      if (params.addMigrationRunResponseForLint) {
+        summaryText = `${summaryText}\r\n\r\n${builder.run(params.migrationRunListResponse)}`
+      }
     } else {
-      githubSummaryText = builder.github(params.migrationRunListResponse)
+      summaryText = builder.run(params.migrationRunListResponse)
     }
 
+    return summaryText
+  }
+
+  async buildGithubComment(builder: TextBuilder, params: NotifyParams): Promise<GithubNotifyResponse> {
+    const githubSummaryText = this.#buildSummary(builder.platform.github, params)
     core.summary.addRaw(githubSummaryText)
 
-    let ghCommentPromise: Promise<IssueUpdateCommentResponse | IssueCreateCommentResponse>
-    if ('commentId' in this.#migrationMeta) {
+    let ghCommentPromise: Promise<GithubNotifyResponse>
+    if (params.closePR === true) {
+      ghCommentPromise = this.#ghClient.closePR(this.#pr.number, githubSummaryText)
+    } else if ('commentId' in this.#migrationMeta) {
       ghCommentPromise = this.#ghClient.updateComment(
         this.#migrationMeta.commentId,
         `${this.#migrationMeta.commentBody}\r\n\r\n${githubSummaryText}`
@@ -80,14 +74,10 @@ Unmatched Files:
   }
 
   async buildJiraComment(
-    builder: TextBuilder,
+    builder: ITextBuilder,
     params: NotifyParams
   ): Promise<[Promise<JiraIssue | undefined>, Promise<JiraComment | undefined>]> {
-    const { migrationRunListResponse, lintResponseList } = params
     let jiraIssue = params.jiraIssue
-
-    let jiraIssuePromise: Promise<JiraIssue | undefined> = Promise.resolve(undefined)
-    let jiraCommentPromise: Promise<JiraComment | undefined> = Promise.resolve(undefined)
 
     /**
      * We will have JIRA integration iff
@@ -112,28 +102,25 @@ Unmatched Files:
     core.debug(`Can create JIRA Issue or Command: ${canIntegrateWithJira ? 'Yes' : 'No'}`)
 
     if (!canIntegrateWithJira || !this.#jiraClient) {
-      return [jiraIssuePromise, jiraCommentPromise]
+      return [Promise.resolve(undefined), Promise.resolve(undefined)]
     }
 
     if (jiraIssue === undefined) {
       jiraIssue = await this.#jiraClient.findIssue(this.#pr.html_url)
     }
 
-    let issueComment = ''
-    if (lintResponseList && lintResponseList.errMsg) {
-      issueComment = builder.jiraLint(lintResponseList.lintResponseList)
-    } else {
-      issueComment = builder.jira(migrationRunListResponse)
-    }
+    const issueComment = this.#buildSummary(builder, params)
 
+    let jiraIssuePromise: Promise<JiraIssue | undefined> = Promise.resolve(undefined)
+    let jiraCommentPromise: Promise<JiraComment | undefined> = Promise.resolve(undefined)
     // Add issue or comment
     if (jiraIssue) {
       jiraCommentPromise = this.#jiraClient.addComment(jiraIssue.id, issueComment)
       jiraIssuePromise = Promise.resolve(jiraIssue)
     } else {
       jiraIssuePromise = this.#jiraClient.createIssue({
-        title: builder.jiraTitle(this.#config.serviceName),
-        description: builder.jiraDescription(issueComment),
+        title: builder.title(this.#config.serviceName),
+        description: builder.description(issueComment),
         prLink: this.#pr.html_url,
         repoLink: this.#pr.base.repo.html_url,
         prNumber: this.#pr.number
@@ -152,7 +139,7 @@ Unmatched Files:
     )
 
     const ghCommentPromise = this.buildGithubComment(builder, params)
-    const [jiraIssuePromise, jiraCommentPromise] = await this.buildJiraComment(builder, params)
+    const [jiraIssuePromise, jiraCommentPromise] = await this.buildJiraComment(builder.platform.jira, params)
 
     const response = await Promise.allSettled([
       ghCommentPromise,

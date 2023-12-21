@@ -13,7 +13,6 @@ import {
 } from '../types'
 import { SecretMap } from '../client/vault/types'
 import * as atlas from './atlas'
-import { AtlasLintResponse, AtlasMigrationExecutionResponse } from './atlas-class'
 
 export const TEMP_DIR_FOR_MIGRATION = 'tmp/__migrations__'
 
@@ -61,7 +60,7 @@ async function hydrateMigrationConfigWithDBAndDir(
   }
 
   const tempMigrationSQLDir = await util.createTempDir(path.join(TEMP_DIR_FOR_MIGRATION, dbConfig.directory))
-  await ensureSQLFilesInMigrationDir(migrationConfig.dir, tempMigrationSQLDir)
+  await ensureSQLFilesInMigrationDir(migrationConfig.originalDir, tempMigrationSQLDir)
   await ensureAtlasConfigFile(tempMigrationSQLDir)
 
   migrationConfig.dir = tempMigrationSQLDir
@@ -94,7 +93,9 @@ async function buildMigrationConfigList(
   const migrationList = databases.map(dbConfig => {
     const migrationConfig: MigrationConfig = {
       databaseUrl: '',
-      dir: getDirectoryForDb(baseDirectory, dbConfig), // source directory
+      originalDir: getDirectoryForDb(baseDirectory, dbConfig),
+      relativeDir: path.join(baseDirectory, dbConfig.directory),
+      dir: '', // filled later on when hydrating
       dryRun: true,
       schema: dbConfig.schema,
       baseline: dbConfig.baseline,
@@ -115,27 +116,39 @@ function setDryRun(migrationConfigList: MigrationConfig[], dryRun: boolean): voi
   }
 }
 
-async function runLintFromList(migrationConfigList: MigrationConfig[]): Promise<MigrationLintResponse> {
+/**
+ * This function runs linting on a list of migration configurations.
+ *
+ * @param {MigrationConfig[]} migrationConfigList - An array of migration configurations. Each configuration represents a specific migration.
+ * @param {string[]} skipErrorCodeList - An array of error codes to be skipped during the linting process. See https://atlasgo.io/lint/analyzers#checks
+ *
+ * @returns {Promise<void>} - The function returns a promise that resolves to void. It's an async function, so it can be awaited.
+ *
+ * @example
+ *
+ * const migrationConfigs = [{...}, {...}, {...}];
+ * const skipCodes = ['E001', 'W002'];
+ * await runLintFromList(migrationConfigs, skipCodes);
+ */
+async function runLintFromList(
+  migrationConfigList: MigrationConfig[],
+  skipErrorCodeList: string[]
+): Promise<MigrationLintResponse> {
   const lintResponseList: LintExecutionResponse[] = []
+  let canSkipAllErrors = true
 
   let errMsg: string | undefined
 
   for (const migrationConfig of migrationConfigList) {
-    try {
-      const lintResponse = await atlas.lint(migrationConfig)
-      if (!errMsg && lintResponse.getFirstError()) {
-        errMsg = lintResponse.getFirstError()
-      }
-      lintResponseList.push(lintResponse)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (ex: any) {
-      errMsg = (ex.message || `${ex}`) as string
-      lintResponseList.push(AtlasLintResponse.fromError(errMsg, migrationConfig.dir))
-      core.info(`ErrorLint[tmp_dir=${migrationConfig.dir}]: ${ex} ${ex.stack}`)
+    const lintResponse = await atlas.lint(migrationConfig, skipErrorCodeList)
+    canSkipAllErrors = canSkipAllErrors && lintResponse.canSkipAllErrors()
+    if (!errMsg && lintResponse.getFirstError()) {
+      errMsg = lintResponse.getFirstError()
     }
+    lintResponseList.push(lintResponse)
   }
 
-  return { lintResponseList, errMsg }
+  return { lintResponseList, errMsg, canSkipAllErrors }
 }
 
 async function runMigrationFromList(
@@ -148,21 +161,13 @@ async function runMigrationFromList(
 
   for (const migrationConfig of migrationConfigList) {
     migrationConfig.dryRun = dryRun
-    let response: MigrationExecutionResponse
-    try {
-      response = await atlas.run(migrationConfig)
-      if (response.hasMigrations()) {
-        migrationAvailable = true
-      }
+    const response = await atlas.run(migrationConfig)
+    if (response.hasMigrations()) {
+      migrationAvailable = true
+    }
 
-      if (!errMsg && response.getFirstError()) {
-        errMsg = response.getFirstError()
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (ex: any) {
-      errMsg = (ex.message || `${ex}`) as string
-      response = AtlasMigrationExecutionResponse.fromError(errMsg)
-      core.info(`ErrorApply[tmp_dir=${migrationConfig.dir}]: ${ex} ${ex.stack}`)
+    if (!errMsg && response.getFirstError()) {
+      errMsg = response.getFirstError()
     }
     migrationResponseList.push(response)
   }

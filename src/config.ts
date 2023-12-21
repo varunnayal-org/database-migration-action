@@ -68,6 +68,15 @@ export interface Config {
    * Configuration options for JIRA integration.
    */
   jira?: JIRAConfig
+
+  /**
+   * Represents the prefix for the label of lint errors that can be skipped.
+   *
+   * This property is of type `string`. It is used to identify lint errors that can be skipped
+   * based on their label. By convention, any lint error whose label starts with this prefix
+   * can be skipped.
+   */
+  lintErrorSkipLabelPrefix: string
 }
 
 export interface DatabaseConfig {
@@ -80,6 +89,7 @@ export interface DatabaseConfig {
 function prepareRuntimeConfig(config: Config, configFileName: string): void {
   config.configFileName = configFileName
   config.devDBUrl = core.getInput('dev_db_url')
+  config.lintErrorSkipLabelPrefix = config.lintErrorSkipLabelPrefix || 'db-migration:lint:skip:'
 
   config.dbSecretNameList = config.databases.reduce<string[]>((acc, dbConfig, idx) => {
     if (!dbConfig.envName) {
