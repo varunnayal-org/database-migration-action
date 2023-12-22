@@ -2,6 +2,17 @@ import path from 'path'
 import * as core from '@actions/core'
 import { getInput } from './util'
 import { Config as JIRAConfig } from './client/jira'
+import {
+  DEFAULT_JIRA_COMPLETED_STATUS,
+  DEFAULT_JIRA_DRI_APPROVAL_STATUS,
+  DEFAULT_JIRA_ISSUE_TYPE,
+  DEFAULT_MIGRATION_BASE_DIR,
+  DEFAULT_MIGRATION_CHILD_DIR,
+  DEFAULT_PR_LABEL,
+  DEFAULT_SCHEMA,
+  LINT_CODE_DEFAULT_PREFIXES,
+  LINT_SKIP_ERROR_LABEL_PREFIX
+} from './constants'
 
 /**
  * Represents the configuration options for the database migration action.
@@ -70,13 +81,21 @@ export interface Config {
   jira?: JIRAConfig
 
   /**
+   * An array of prefixes for lint error codes.
+   *
+   * This property is of type `string[]`. It is used to categorize lint errors based on their code prefix.
+   * By convention, the lint error's code prefix can be used to determine the type or category of the error.
+   */
+  lintCodePrefixes: string[]
+
+  /**
    * Represents the prefix for the label of lint errors that can be skipped.
    *
    * This property is of type `string`. It is used to identify lint errors that can be skipped
    * based on their label. By convention, any lint error whose label starts with this prefix
    * can be skipped.
    */
-  lintErrorSkipLabelPrefix: string
+  lintSkipErrorLabelPrefix: string
 }
 
 export interface DatabaseConfig {
@@ -89,7 +108,8 @@ export interface DatabaseConfig {
 function prepareRuntimeConfig(config: Config, configFileName: string): void {
   config.configFileName = configFileName
   config.devDBUrl = core.getInput('dev_db_url')
-  config.lintErrorSkipLabelPrefix = config.lintErrorSkipLabelPrefix || 'db-migration:lint:skip:'
+  config.lintCodePrefixes = LINT_CODE_DEFAULT_PREFIXES
+  config.lintSkipErrorLabelPrefix = config.lintSkipErrorLabelPrefix || LINT_SKIP_ERROR_LABEL_PREFIX
 
   config.dbSecretNameList = config.databases.reduce<string[]>((acc, dbConfig, idx) => {
     if (!dbConfig.envName) {
@@ -101,9 +121,9 @@ function prepareRuntimeConfig(config: Config, configFileName: string): void {
     acc.push(dbConfig.envName)
 
     if (!dbConfig.directory) {
-      dbConfig.directory = '.'
+      dbConfig.directory = DEFAULT_MIGRATION_CHILD_DIR
     }
-    dbConfig.schema = dbConfig.schema || 'public'
+    dbConfig.schema = dbConfig.schema || DEFAULT_SCHEMA
     return acc
   }, [])
 
@@ -131,13 +151,13 @@ export default function buildConfig(): Config {
   config.allTeams = [...new Set([...config.ownerTeams, ...config.approvalTeams])]
 
   if (!config.baseDirectory) {
-    config.baseDirectory = './migrations'
+    config.baseDirectory = DEFAULT_MIGRATION_BASE_DIR
   }
   if (!config.baseBranch) {
     config.baseBranch = 'main'
   }
 
-  config.prLabel = config.prLabel || 'db-migration'
+  config.prLabel = config.prLabel || DEFAULT_PR_LABEL
 
   prepareRuntimeConfig(config, configFileName)
 
@@ -154,16 +174,16 @@ const getJiraConfig = (jiraLabel: string): JIRAConfig | undefined => {
 
   const jiraConfig = JSON.parse(jiraConfigString) as JIRAConfig
   jiraConfig.fields = jiraConfig.fields || {}
-  jiraConfig.issueType = jiraConfig.issueType || 'Task'
+  jiraConfig.issueType = jiraConfig.issueType || DEFAULT_JIRA_ISSUE_TYPE
   jiraConfig.label = jiraLabel
-  jiraConfig.doneValue = jiraConfig.doneValue || 'Done'
+  jiraConfig.doneValue = jiraConfig.doneValue || DEFAULT_JIRA_COMPLETED_STATUS
 
   if ('driApprovals' in jiraConfig.fields) {
     if (!jiraConfig.fields.driApprovals) {
       jiraConfig.fields.driApprovals = []
     } else if (typeof jiraConfig.fields.driApprovals === 'string') {
       jiraConfig.fields.driApprovals = (jiraConfig.fields.driApprovals as string).split(',')
-      jiraConfig.approvalStatus = jiraConfig.approvalStatus || 'DONE'
+      jiraConfig.approvalStatus = jiraConfig.approvalStatus || DEFAULT_JIRA_DRI_APPROVAL_STATUS
     }
   }
 

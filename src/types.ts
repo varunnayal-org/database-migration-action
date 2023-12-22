@@ -390,6 +390,10 @@ export interface Formatter {
    */
   tableCodeBlockAllowed: boolean
 
+  bold: (value: string) => string
+  italic: (value: string) => string
+  inlineCode: (value: string) => string
+
   /**
    * A function that escapes a column value.
    *

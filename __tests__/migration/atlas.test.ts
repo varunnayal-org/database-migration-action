@@ -1,10 +1,10 @@
 import path from 'path'
 
 import * as util from '../../src/util'
-import * as migration from '../../src/migration/migration'
 import * as atlas from '../../src/migration/atlas'
 import { MigrationConfig } from '../../src/types'
 import { AtlasMigrationExecutionResponse, VersionExecution } from '../../src/migration/atlas-class'
+import { TEMP_DIR_FOR_MIGRATION } from '../../src/constants'
 
 let utilExec: jest.SpyInstance
 
@@ -14,9 +14,9 @@ const getExpectedMigrationConfigList = (
   schema = 'public',
   devUrl = 'test'
 ): MigrationConfig => ({
-  dir: path.join(migration.TEMP_DIR_FOR_MIGRATION, dir),
-  relativeDir: path.join(migration.TEMP_DIR_FOR_MIGRATION, dir),
-  originalDir: path.join(migration.TEMP_DIR_FOR_MIGRATION, dir),
+  dir: path.join(TEMP_DIR_FOR_MIGRATION, dir),
+  relativeDir: path.join(TEMP_DIR_FOR_MIGRATION, dir),
+  originalDir: path.join(TEMP_DIR_FOR_MIGRATION, dir),
   databaseUrl: dbUrlKey,
   schema,
   baseline: '',

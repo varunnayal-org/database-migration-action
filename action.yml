@@ -124,7 +124,7 @@ runs:
     - name: setup atlas
       shell: bash
       if: (steps.checks.outputs.can_execute == '1' && steps.cache-atlas.outputs.cache-hit != 'true')
-      run: curl -sSf https://atlasgo.sh | ATLAS_NO_UPDATE_NOTIFIER=false ATLAS_VERSION=${{inputs.atlas_version}} CI=true sh -s -- --community
+      run: curl -sSf https://atlasgo.sh | ATLAS_VERSION=${{inputs.atlas_version}} CI=true sh -s -- --community
 
     - name: setup_node
       uses: actions/setup-node@v4

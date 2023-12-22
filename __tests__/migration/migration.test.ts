@@ -7,13 +7,15 @@ import * as migration from '../../src/migration/migration'
 import { MigrationConfig, MigrationRunListResponse } from '../../src/types'
 import { SecretMap } from '../../src/client/vault/types'
 import { DatabaseConfig } from '../../src/config'
-import { AtlasMigrationExecutionResponse, VersionExecution } from '../../src/migration/atlas-class'
+import { AtlasMigrationExecutionResponse } from '../../src/migration/atlas-class'
+import * as c from '../common'
+import { TEMP_DIR_FOR_MIGRATION } from '../../src/constants'
 
 let atlasRun: jest.SpyInstance
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const getMockDirectories = (): Record<string, any> => ({
-  [`${migration.TEMP_DIR_FOR_MIGRATION}`]: mock.directory(),
+  [`${TEMP_DIR_FOR_MIGRATION}`]: mock.directory(),
   migrations: {
     'readme.md': '# Readme',
     'other_file.txt': 'test file',
@@ -44,30 +46,6 @@ const getMockDirectories = (): Record<string, any> => ({
   }
 })
 
-function getBaseExecutionList(): VersionExecution[] {
-  return [
-    {
-      Name: '20231129060014_add_user.sql',
-      Version: '20231129060014',
-      Description: 'add_user',
-      Start: '2023-12-11T10:55:19.468908+05:30',
-      End: '2023-12-11T10:55:19.470647+05:30',
-      Applied: [
-        'CREATE TABLE users (id uuid NOT NULL, PRIMARY KEY ("id"));',
-        'ALTER TABLE "users" ADD COLUMN "phone" varchar(13);'
-      ]
-    },
-    {
-      Name: '20231206212844_add_column.sql',
-      Version: '20231206212844',
-      Description: 'add_column',
-      Start: '2023-12-11T10:55:19.470647+05:30',
-      End: '2023-12-11T10:55:19.470648+05:30',
-      Applied: ['ALTER TABLE "users" ADD COLUMN "email" varchar(255);']
-    }
-  ]
-}
-
 const getDB = (directory = '.', envName = 'test', schema = 'public'): DatabaseConfig => ({
   directory,
   envName,
@@ -84,7 +62,7 @@ const getExpectedMigrationConfigList = (
   devUrl = 'test'
 ): MigrationConfig[] => [
   {
-    dir: path.join(migration.TEMP_DIR_FOR_MIGRATION, dir),
+    dir: path.join(TEMP_DIR_FOR_MIGRATION, dir),
     originalDir: path.join(baseDir, dir),
     relativeDir: path.join(baseDir, dir),
     databaseUrl,
@@ -119,7 +97,7 @@ describe('buildMigrationConfigList', () => {
         getExpectedMigrationConfigList()
       )
 
-      expect(await fs.readdir(migration.TEMP_DIR_FOR_MIGRATION)).toEqual([
+      expect(await fs.readdir(TEMP_DIR_FOR_MIGRATION)).toEqual([
         '00000000000001_create_test_table.sql',
         '00000000000002_create_test2_table.sql',
         'atlas.hcl'
@@ -203,59 +181,10 @@ describe('buildMigrationConfigList', () => {
 })
 
 describe('runMigrationFromList', () => {
-  const getAtlasSuccessfulRunResponseString = (): string => JSON.stringify(getBaseExecutionList())
   const getAtlasSuccessfulRunResponse = (): AtlasMigrationExecutionResponse =>
-    AtlasMigrationExecutionResponse.build(getAtlasSuccessfulRunResponseString())
+    AtlasMigrationExecutionResponse.build(c.executionListForDB1)
   const getAtlasRunResponseForNull = AtlasMigrationExecutionResponse.build('null')
   const getAtlasRunResponseForEmptyString = AtlasMigrationExecutionResponse.build('')
-
-  function getBaseExecutionListForDB2(): VersionExecution[] {
-    return [
-      {
-        Name: '20231221010101_add_session.sql',
-        Version: '20231221010101',
-        Description: 'add_session',
-        Start: '2023-12-11T10:55:19.468908+05:30',
-        End: '2023-12-11T10:55:19.470647+05:30',
-        Applied: [
-          'CREATE TABLE session (id uuid NOT NULL, PRIMARY KEY ("id"));',
-          'ALTER TABLE "session" ADD COLUMN "phone" varchar(13);'
-        ]
-      },
-      {
-        Name: '20231207000000_add_column.sql',
-        Version: '20231207000000',
-        Description: 'add_column',
-        Start: '2023-12-11T10:55:19.470647+05:30',
-        End: '2023-12-11T10:55:19.470648+05:30',
-        Applied: ['ALTER TABLE "session" ADD COLUMN "email" varchar(255);']
-      }
-    ]
-  }
-
-  function getBaseExecutionListForDB3(): VersionExecution[] {
-    return [
-      {
-        Name: '20231222010101_add_users.sql',
-        Version: '20231222010101',
-        Description: 'add_users',
-        Start: '2023-12-11T10:55:19.468908+05:30',
-        End: '2023-12-11T10:55:19.470647+05:30',
-        Applied: [
-          'CREATE TABLE users (id uuid NOT NULL, PRIMARY KEY ("id"));',
-          'ALTER TABLE "users" ADD COLUMN "phone" varchar(13);'
-        ]
-      },
-      {
-        Name: '20231223000000_add_column.sql',
-        Version: '20231223000000',
-        Description: 'add_column',
-        Start: '2023-12-11T10:55:19.470647+05:30',
-        End: '2023-12-11T10:55:19.470648+05:30',
-        Applied: ['ALTER TABLE "users" ADD COLUMN "old_phone" varchar(13);']
-      }
-    ]
-  }
 
   beforeEach(() => {
     jest.clearAllMocks()
@@ -355,9 +284,9 @@ describe('runMigrationFromList', () => {
         if (atlasRunFnCallCount === 1) {
           return getAtlasSuccessfulRunResponse()
         } else if (atlasRunFnCallCount === 2) {
-          return AtlasMigrationExecutionResponse.build(JSON.stringify(getBaseExecutionListForDB2()))
+          return AtlasMigrationExecutionResponse.build(c.executionListForDB2)
         } else if (atlasRunFnCallCount === 3) {
-          return AtlasMigrationExecutionResponse.build(JSON.stringify(getBaseExecutionListForDB3()))
+          return AtlasMigrationExecutionResponse.build(c.executionListForDB3)
         }
       })
 
@@ -367,8 +296,8 @@ describe('runMigrationFromList', () => {
         migrationAvailable: true,
         executionResponseList: [
           getAtlasSuccessfulRunResponse(),
-          AtlasMigrationExecutionResponse.build(JSON.stringify(getBaseExecutionListForDB2())),
-          AtlasMigrationExecutionResponse.build(JSON.stringify(getBaseExecutionListForDB3()))
+          AtlasMigrationExecutionResponse.build(c.executionListForDB2),
+          AtlasMigrationExecutionResponse.build(c.executionListForDB3)
         ]
       }
 

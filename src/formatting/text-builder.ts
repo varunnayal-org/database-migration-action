@@ -1,5 +1,5 @@
 import { Formatter, ITextBuilder, LintExecutionResponse, MigrationRunListResponse } from '../types'
-import { readableDate } from '../util'
+import * as util from '../util'
 import { Platform, formatterMap } from './formatters'
 
 export class TextBuilder {
@@ -24,7 +24,7 @@ export class TextBuilder {
 
     const tableStr = response.executionResponseList.reduce<string>((acc, executionResponseList, idx) => {
       sqlStatementString += `-- DIRECTORY: ${this.dbDirList[idx]}`
-      const migrationDirMsg = `*Directory*: **${this.dbDirList[idx]}**`
+      const migrationDirMsg = `${fmt.italic('Directory')}: ${fmt.bold(this.dbDirList[idx])}`
       if (executionResponseList.hasMigrations() === false) {
         sqlStatementString += '\n    -- No migration available\n\n'
         return `${migrationDirMsg}: No migration available\n\n`
@@ -33,9 +33,9 @@ export class TextBuilder {
       const table = executionResponseList.getExecutedMigrations().reduce<string>(
         (tableRows, version) => {
           const versionErr = version.getVersionError()
-          const successfullyExecutedStatementList = version.getAppliedStatements()
+          let successfullyExecutedStatementList = version.getAppliedStatements()
           if (versionErr) {
-            successfullyExecutedStatementList.pop()
+            successfullyExecutedStatementList = successfullyExecutedStatementList.slice(0, -1)
           }
           const rowString = [
             // emoji
@@ -78,13 +78,13 @@ export class TextBuilder {
    * The comment message includes information about the migration status, error message (if any), and a link to the GitHub Actions run.
    * If a table is available, it is also included in the comment message.
    * @param response - The MigrationRunListResponse object.
-   * @param formatter - The Formatter object used for formatting.
+   * @param fmt - The Formatter object used for formatting.
    * @returns An array containing the comment message and context string.
    */
-  build(response: MigrationRunListResponse, formatter: Formatter): string {
+  build(response: MigrationRunListResponse, fmt: Formatter): string {
     const printMsgPrefix = this.dryRun ? '[DryRun]Migrations' : 'Migrations'
     let printStatus = 'successful'
-    let printEmoji = formatter.success
+    let printEmoji = fmt.success
 
     let printErrMsg = response.errMsg
     if (!printErrMsg && response.migrationAvailable === false) {
@@ -93,7 +93,7 @@ export class TextBuilder {
 
     if (printErrMsg) {
       printStatus = 'failed'
-      printEmoji = formatter.failure
+      printEmoji = fmt.failure
     }
 
     const ghActionUrl = `${this.repoLink}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${
@@ -101,20 +101,20 @@ export class TextBuilder {
     }`
 
     const lines = [
-      `${printEmoji} **${printMsgPrefix} ${printStatus}** ${readableDate()} ${formatter.linkBuilder(
+      `${printEmoji} ${fmt.bold(`${printMsgPrefix} ${printStatus}`)} ${util.readableDate()} ${fmt.linkBuilder(
         'View',
         ghActionUrl
       )}`
     ]
 
     if (printErrMsg) {
-      lines.push(`${formatter.quoteBuilder(printErrMsg)}`)
+      lines.push(`${fmt.quoteBuilder(printErrMsg)}`)
     }
 
     if (response.executionResponseList.length > 0) {
-      const [table, sqlStatements] = this.#buildTableAndSQLStatement(formatter, response)
+      const [table, sqlStatements] = this.#buildTableAndSQLStatement(fmt, response)
       lines.push(table)
-      lines.push(formatter.sqlStatementBuilder(sqlStatements))
+      lines.push(fmt.sqlStatementBuilder(sqlStatements))
     }
 
     return lines.join('\n')
@@ -127,7 +127,7 @@ export class TextBuilder {
           return textAcc
         }
 
-        textAcc.push(`*Directory*: \`${lintResult.getMigrationDirectory()}\``)
+        textAcc.push(`${fmt.italic('Directory')}: ${fmt.inlineCode(lintResult.getMigrationDirectory())}`)
 
         if (lintResult.getFileLintResults().length === 0) {
           textAcc.push(`: ${lintResult.getFirstError() as string}`)
@@ -144,13 +144,13 @@ export class TextBuilder {
               // filename
               fileLintResult.getName(),
               // error
-              fmt.cEsc(lintError.getMessage()),
+              fmt.cEsc(lintError.getMessage() || '-'),
               // error code
               lintError.getHelpUrl()
                 ? fmt.linkBuilder(lintError.getErrorCode(), lintError.getHelpUrl())
-                : lintError.getErrorCode(),
+                : lintError.getErrorCode() || '-',
               // position
-              lintError.getPosition() >= 0 ? lintError.getPosition() : ''
+              lintError.getPosition() >= 0 ? lintError.getPosition() : '-'
             ]
 
             textAcc.push(`${fmt.rSep}${rowData.join(fmt.rSep)}${fmt.rSep}`)
@@ -159,7 +159,7 @@ export class TextBuilder {
         textAcc.push('')
         return textAcc
       },
-      ['**Lint Errors**']
+      [fmt.bold('Lint Errors')]
     )
 
     return textList.join('\n')

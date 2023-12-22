@@ -26,11 +26,7 @@ import {
 import { VaultClient } from './client/vault/types'
 import { NotifierService } from './notifier.service'
 import { globFromList } from './util'
-
-const CMD_DRY_RUN = 'db migrate dry-run'
-const CMD_DRY_RUN_JIRA = 'db migrate jira'
-const CMD_APPLY = 'db migrate'
-const NO_MIGRATION_AVAILABLE = '1No migrations available'
+import { CMD_DRY_RUN, CMD_DRY_RUN_JIRA, CMD_APPLY, NO_MIGRATION_AVAILABLE } from './constants'
 
 export default class MigrationService {
   #ghClient: GHClient
@@ -390,8 +386,8 @@ export default class MigrationService {
 
   #getLintErrorCodesThatCanBeSkipped(labels: gha.Label[]): string[] {
     return labels
-      .filter(label => label.name.startsWith(this.#config.lintErrorSkipLabelPrefix))
-      .map(label => label.name.split(this.#config.lintErrorSkipLabelPrefix)[1])
+      .filter(label => label.name.startsWith(this.#config.lintSkipErrorLabelPrefix))
+      .map(label => label.name.split(this.#config.lintSkipErrorLabelPrefix)[1])
       .filter(Boolean)
   }
 
@@ -419,7 +415,12 @@ export default class MigrationService {
 
     let lintResponseList: MigrationLintResponse | undefined
     if (migrationMeta.lintRequired) {
-      lintResponseList = await runLintFromList(migrationConfigList, this.#getLintErrorCodesThatCanBeSkipped(pr.labels)) // codes like: ['PG103', 'BC102', 'DS103']
+      lintResponseList = await runLintFromList(
+        migrationConfigList,
+        // codes like: ['PG103', 'BC102', 'DS103']
+        this.#getLintErrorCodesThatCanBeSkipped(pr.labels),
+        this.#config.lintCodePrefixes
+      )
     }
 
     const migrationRunListResponse = await runMigrationFromList(migrationConfigList, true)

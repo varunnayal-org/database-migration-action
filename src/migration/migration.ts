@@ -13,8 +13,7 @@ import {
 } from '../types'
 import { SecretMap } from '../client/vault/types'
 import * as atlas from './atlas'
-
-export const TEMP_DIR_FOR_MIGRATION = 'tmp/__migrations__'
+import { TEMP_DIR_FOR_MIGRATION } from '../constants'
 
 function getDirectoryForDb(baseDirectory: string, dbConfig: DatabaseConfig): string {
   return path.join(process.env.LOCAL_TESTING_REPO_DIR || '', baseDirectory, dbConfig.directory)
@@ -132,7 +131,8 @@ function setDryRun(migrationConfigList: MigrationConfig[], dryRun: boolean): voi
  */
 async function runLintFromList(
   migrationConfigList: MigrationConfig[],
-  skipErrorCodeList: string[]
+  skipErrorCodeList: string[],
+  lintCodePrefixes: string[]
 ): Promise<MigrationLintResponse> {
   const lintResponseList: LintExecutionResponse[] = []
   let canSkipAllErrors = true
@@ -140,7 +140,7 @@ async function runLintFromList(
   let errMsg: string | undefined
 
   for (const migrationConfig of migrationConfigList) {
-    const lintResponse = await atlas.lint(migrationConfig, skipErrorCodeList)
+    const lintResponse = await atlas.lint(migrationConfig, skipErrorCodeList, lintCodePrefixes)
     canSkipAllErrors = canSkipAllErrors && lintResponse.canSkipAllErrors()
     if (!errMsg && lintResponse.getFirstError()) {
       errMsg = lintResponse.getFirstError()

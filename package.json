@@ -33,6 +33,7 @@
     "package": "ncc build src/index.ts",
     "package:watch": "npm run package -- --watch",
     "test": "jest",
+    "test-open": "npm test && open coverage/lcov-report/index.html",
     "super-lint": "./script/super-linter",
     "workflow:lint-act": "act -j lint",
     "workflow:lint:md": "markdownlint -c .github/linters/.markdown-lint.yml --ignore node_modules --ignore tmp .",

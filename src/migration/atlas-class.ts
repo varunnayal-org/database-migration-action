@@ -248,7 +248,12 @@ export class AtlasLintResponse implements LintExecutionResponse {
     return new AtlasLintResponse([], migrationDir, false, error)
   }
 
-  static build(atlasResponse: string, migrationDir: string, skipErrorCodeList: string[]): AtlasLintResponse {
+  static build(
+    atlasResponse: string,
+    migrationDir: string,
+    skipErrorCodeList: string[],
+    lintCodePrefixes: string[] = []
+  ): AtlasLintResponse {
     let firstError: string | undefined
     let allSkipped = true
     let fileLintResults: LintFileResult[] = []
@@ -274,6 +279,10 @@ export class AtlasLintResponse implements LintExecutionResponse {
 
         for (const reportJson of reports) {
           for (const diagnosticJson of reportJson.Diagnostics || []) {
+            // if the error code is not allowed, then continue
+            if (!lintCodePrefixes.some(prefix => diagnosticJson.Code.startsWith(prefix))) {
+              continue
+            }
             if (!firstError) {
               firstError = diagnosticJson.Text
             }
