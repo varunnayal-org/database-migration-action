@@ -1,4 +1,3 @@
-import path from 'path'
 import * as core from '@actions/core'
 import GHClient from './client/github'
 import JiraClient, { JiraIssue } from './client/jira'
@@ -8,10 +7,7 @@ import {
   runMigrationFromList,
   buildMigrationConfigList,
   runLintFromList,
-  hydrateMigrationConfigList,
-  hasExtensions,
-  hasExtension,
-  getRelativePathForDbDirectory
+  hydrateMigrationConfigList
 } from './migration/migration'
 import {
   MatchTeamWithPRApproverResult,
@@ -25,7 +21,7 @@ import {
 } from './types'
 import { VaultClient } from './client/vault/types'
 import { NotifierService } from './notifier.service'
-import { globFromList } from './util'
+import * as validators from './validators'
 import { CMD_DRY_RUN, CMD_DRY_RUN_JIRA, CMD_APPLY, NO_MIGRATION_AVAILABLE } from './constants'
 
 export default class MigrationService {
@@ -39,17 +35,6 @@ export default class MigrationService {
     this.#ghClient = client
     this.#jiraClient = jiraClient
     this.secretClient = secretClient
-  }
-
-  #validatePullRequest(pullRequest: gha.PullRequest): string | undefined {
-    const { base } = pullRequest
-    if (base.ref !== this.#config.baseBranch) {
-      return `Base branch should be ${this.#config.baseBranch}, found ${base.ref}`
-    } else if (pullRequest.state !== 'open') {
-      return `PR is in ${pullRequest.state} state`
-    } else if (pullRequest.draft) {
-      return 'PR is in draft state'
-    }
   }
 
   #hasLabel(labels: gha.Label[], label: string): boolean {
@@ -69,55 +54,6 @@ export default class MigrationService {
     }
   }
 
-  async #validateChangedFiles(
-    pullRequest: gha.PullRequest,
-    migrationConfigList: MigrationConfig[]
-  ): Promise<ChangedFileValidationError | undefined> {
-    const changedFiles = await this.#ghClient.getChangedFiles(pullRequest.number)
-    let hasMigrationVersionFile = false
-    if (changedFiles.length === 0) {
-      return { errMsg: 'No files changed', unmatched: [], migrationAvailable: hasMigrationVersionFile }
-    }
-
-    const { matched, unmatched } = globFromList(
-      migrationConfigList.map(migrationConfig => getRelativePathForDbDirectory(migrationConfig.originalDir)),
-      changedFiles
-    )
-
-    for (let idx = 0; idx < matched.length; idx++) {
-      const matchedFiles = matched[idx].filter(file => hasExtension(file, '.sql'))
-
-      migrationConfigList[idx].lintLatestFiles = matchedFiles.length
-      hasMigrationVersionFile = hasMigrationVersionFile || matchedFiles.length > 0
-    }
-
-    if (hasMigrationVersionFile === false) {
-      core.debug('No migrations files found')
-      return { errMsg: NO_MIGRATION_AVAILABLE, unmatched: [], migrationAvailable: hasMigrationVersionFile }
-    }
-
-    const unmatchedFilesToConsider = unmatched.filter(file => {
-      // "./db.migration.json" to "db.migration.json"
-      if (file === path.relative('.', this.#config.configFileName) || file === 'Makefile') {
-        return false
-      }
-
-      if (hasExtensions(file, ['.yml', '.yaml', '.sql'])) {
-        return false
-      }
-
-      return true
-    })
-    if (unmatchedFilesToConsider.length > 0) {
-      core.error(`Found unwanted files: ${JSON.stringify(unmatchedFilesToConsider, null, 2)}`)
-      return {
-        errMsg: 'Unwanted files found',
-        migrationAvailable: hasMigrationVersionFile,
-        unmatched: unmatchedFilesToConsider
-      }
-    }
-  }
-
   async #processChangedFileValidationError(
     validationErr: ChangedFileValidationError,
     pr: gha.PullRequest,
@@ -128,52 +64,6 @@ export default class MigrationService {
       changedFileValidation: validationErr,
       closePR: true
     })
-  }
-
-  /**
-   * Add label if not present
-   *
-   * @param {gha.ContextPullRequest} event
-   */
-  async #processPullRequest(event: gha.ContextPullRequest): Promise<RunMigrationResult> {
-    const { payload } = event
-    const pr = payload.pull_request
-    const migrationMeta: MigrationMeta = {
-      eventName: event.eventName,
-      actionName: payload.action,
-      source: 'pr',
-      triggeredBy: pr.user,
-      ensureJiraTicket: true,
-      lintRequired: true
-    }
-    const migrationConfigList = await buildMigrationConfigList(
-      this.#config.baseDirectory,
-      this.#config.databases,
-      this.#config.devDBUrl,
-      {},
-      false
-    )
-
-    const validationResult = await this.#validateChangedFiles(pr, migrationConfigList)
-    if (validationResult) {
-      if (validationResult.migrationAvailable) {
-        core.setFailed(validationResult.errMsg)
-        await this.#processChangedFileValidationError(validationResult, pr, migrationMeta)
-      }
-      return {
-        executionResponseList: [],
-        migrationAvailable: validationResult.migrationAvailable,
-        ignore: true
-      }
-    }
-
-    // validate files
-    const result = await this.#runMigrationForDryRun(pr, migrationMeta, migrationConfigList)
-
-    if (result.migrationAvailable) {
-      await this.#ensureLabels(pr, result.jiraIssue)
-    }
-    return result
   }
 
   /**
@@ -235,73 +125,6 @@ export default class MigrationService {
     return await notifier.notify(params)
   }
 
-  /**
-   * Check if user who triggered action is part of any service owner's team
-   * @param migrationMeta
-   * @param teamByName
-   * @returns
-   */
-  #validateOwnerTeam(migrationMeta: MigrationMeta, teamByName: { [key: string]: string[] }): boolean {
-    const triggeredByName = migrationMeta.triggeredBy.login
-
-    // check if user who triggered action is part of any team
-    return this.#config.ownerTeams.some(teamName => {
-      if (!teamByName[teamName]) {
-        return false
-      }
-      if (teamByName[teamName].includes(triggeredByName)) {
-        return true
-      }
-      return false
-    })
-  }
-
-  #validateMigrationExecutionForApproval(
-    pullRequest: gha.PullRequest,
-    migrationMeta: MigrationMeta,
-    teams: MatchTeamWithPRApproverResult
-  ): string | undefined {
-    // If required approvals are not in place
-    if (teams.approvalMissingFromTeam.length > 0) {
-      return `PR is not approved by ${teams.approvalMissingFromTeam
-        .map(teamName => `@${pullRequest.base.repo.owner.login}/${teamName}`)
-        .join(', ')}`
-    }
-
-    // If user who triggered action is not part of any owner team
-    if (this.#validateOwnerTeam(migrationMeta, teams.teamByName) === false) {
-      return 'User is not part of any owner team'
-    }
-  }
-
-  #validateMigrationExecutionForJiraApproval(jiraIssue?: JiraIssue | null | undefined): string | undefined {
-    const jiraConfig = this.#config.jira
-    if (!jiraConfig) {
-      return undefined
-    }
-
-    // Jira ticket not created
-    if (!jiraIssue) {
-      return `JIRA Issue not found. Please add comment *${CMD_DRY_RUN}* to create JIRA ticket`
-    }
-
-    // Ticket not resolved
-    if (jiraIssue.fields.resolution?.name !== jiraConfig.doneValue) {
-      return `JIRA issue ${jiraIssue.key} is not resolved yet ${jiraIssue.fields.resolution?.name || 'NA'}`
-    }
-    // DRI Approvals missing
-    const missingDRIApprovals = (jiraConfig.fields.driApprovals || []).filter(field => {
-      if (!jiraIssue.fields[field]) {
-        return true
-      }
-      return jiraIssue.fields[field].value !== jiraConfig.approvalStatus
-    })
-    if (missingDRIApprovals.length > 0) {
-      return `JIRA Issue is not approved by DRIs ${missingDRIApprovals}`
-    }
-    return undefined
-  }
-
   async #runMigrationsForExecution(
     pullRequest: gha.PullRequest,
     migrationMeta: MigrationMeta
@@ -320,13 +143,18 @@ export default class MigrationService {
       this.#jiraClient?.findIssue(pullRequest.html_url) ?? Promise.resolve(undefined)
     ])
 
-    let failureMsg = this.#validateMigrationExecutionForJiraApproval(jiraIssue)
+    let failureMsg = validators.validateMigrationExecutionForJiraApproval(this.#config.jira, jiraIssue)
 
     if (!failureMsg) {
       // Fetch approved grouped by allowed teams
       const teams = await this.#matchTeamWithPRApprovers(prApprovedByUserList)
-      core.debug(`matchTeamWithPRApprovers: ${JSON.stringify(teams)}`)
-      failureMsg = this.#validateMigrationExecutionForApproval(pullRequest, migrationMeta, teams)
+      core.error(`matchTeamWithPRApprovers: ${JSON.stringify(teams)}`)
+      failureMsg = validators.validateMigrationExecutionForApproval(
+        pullRequest,
+        migrationMeta,
+        this.#config.ownerTeams,
+        teams
+      )
     }
 
     const buildCommentInfoFn = this.#buildCommentInfo.bind(this, false, pullRequest, migrationMeta)
@@ -356,7 +184,7 @@ export default class MigrationService {
       migrationRunListResponse.errMsg = NO_MIGRATION_AVAILABLE
       if (pullRequest.labels.some(label => label.name === this.#config.prLabel)) {
         await buildCommentInfoFn({ migrationRunListResponse })
-        core.debug(NO_MIGRATION_AVAILABLE)
+        core.error(NO_MIGRATION_AVAILABLE)
       }
     }
 
@@ -370,7 +198,7 @@ export default class MigrationService {
       successMsg = `${migrationMeta.triggeredBy.login} approved the PR. Migrations ran successfully.`
     }
 
-    core.debug(`Ran Successfully: ${successMsg}`)
+    core.info(`Ran Successfully: ${successMsg}`)
 
     await buildCommentInfoFn({ migrationRunListResponse })
 
@@ -486,6 +314,56 @@ export default class MigrationService {
     return result
   }
 
+  /**
+   * Add label if not present
+   *
+   * @param {gha.ContextPullRequest} event
+   */
+  async #processPullRequest(event: gha.ContextPullRequest): Promise<RunMigrationResult> {
+    const { payload } = event
+    const pr = payload.pull_request
+    const migrationMeta: MigrationMeta = {
+      eventName: event.eventName,
+      actionName: payload.action,
+      source: 'pr',
+      triggeredBy: pr.user,
+      ensureJiraTicket: true,
+      lintRequired: true
+    }
+    const migrationConfigList = await buildMigrationConfigList(
+      this.#config.baseDirectory,
+      this.#config.databases,
+      this.#config.devDBUrl,
+      {},
+      false
+    )
+
+    const validationResult = validators.validateChangedFiles(
+      migrationConfigList,
+      await this.#ghClient.getChangedFiles(pr.number),
+      this.#config.configFileName
+    )
+    if (validationResult) {
+      if (validationResult.migrationAvailable) {
+        core.setFailed(validationResult.errMsg)
+        await this.#processChangedFileValidationError(validationResult, pr, migrationMeta)
+      }
+      return {
+        executionResponseList: [],
+        migrationAvailable: validationResult.migrationAvailable,
+        ignore: true
+      }
+    }
+
+    // validate files
+    const result = await this.#runMigrationForDryRun(pr, migrationMeta, migrationConfigList)
+
+    if (result.migrationAvailable) {
+      await this.#ensureLabels(pr, result.jiraIssue)
+    }
+    return result
+  }
+
   async #processPullRequestComment(event: gha.ContextPullRequestComment): Promise<RunMigrationResult | null> {
     const commentBody = event.payload.comment.body
 
@@ -522,7 +400,10 @@ export default class MigrationService {
 
     core.setOutput('event_type', `${eventName}:${payload.action}`)
 
-    const errMsg = this.#validatePullRequest('pull_request' in payload ? payload.pull_request : payload.issue)
+    const errMsg = validators.validatePullRequest(
+      'pull_request' in payload ? payload.pull_request : payload.issue,
+      this.#config.baseBranch
+    )
     if (errMsg) {
       core.debug(errMsg)
       return

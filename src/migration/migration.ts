@@ -18,15 +18,6 @@ import { TEMP_DIR_FOR_MIGRATION } from '../constants'
 function getDirectoryForDb(baseDirectory: string, dbConfig: DatabaseConfig): string {
   return path.join(process.env.LOCAL_TESTING_REPO_DIR || '', baseDirectory, dbConfig.directory)
 }
-const hasExtension = (file: string, ext: string): boolean => path.extname(file) === ext
-const hasExtensions = (file: string, exts: string[]): boolean => exts.includes(path.extname(file))
-
-function getRelativePathForDbDirectory(directory: string): string {
-  if (process.env.LOCAL_TESTING_REPO_DIR) {
-    return path.relative(process.env.LOCAL_TESTING_REPO_DIR, directory)
-  }
-  return directory
-}
 
 async function ensureSQLFilesInMigrationDir(sourceDir: string, destinationDir: string): Promise<void> {
   // Read files in source directory
@@ -183,10 +174,7 @@ async function runMigrationFromList(
 
 export {
   getDirectoryForDb,
-  getRelativePathForDbDirectory,
   setDryRun,
-  hasExtension,
-  hasExtensions,
   hydrateMigrationConfigList,
   buildMigrationConfigList,
   runMigrationFromList,

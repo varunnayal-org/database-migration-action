@@ -1,6 +1,17 @@
-import * as core from '@actions/core'
 import { spawn } from 'child_process'
 import fs from 'fs'
+import path from 'path'
+import * as core from '@actions/core'
+
+export const hasExtension = (file: string, ext: string): boolean => path.extname(file) === ext
+export const hasExtensions = (file: string, exts: string[]): boolean => exts.includes(path.extname(file))
+
+export function getRelativePathForDbDirectory(directory: string): string {
+  if (process.env.LOCAL_TESTING_REPO_DIR) {
+    return path.relative(process.env.LOCAL_TESTING_REPO_DIR, directory)
+  }
+  return directory
+}
 
 export type CommentBuilderHandler = (boldText: string, msg?: string) => string
 
