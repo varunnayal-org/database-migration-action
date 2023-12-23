@@ -1,4 +1,4 @@
-import { getOctokit } from '@actions/github'
+import * as github from '@actions/github'
 import * as core from '@actions/core'
 import { getInput } from '../util'
 // eslint-disable-next-line import/no-unresolved
@@ -8,7 +8,7 @@ import { RestEndpointMethodTypes } from '@octokit/rest'
 // eslint-disable-next-line import/no-unresolved
 import { OctokitResponse } from '@octokit/types'
 
-type GithubClient = ReturnType<typeof getOctokit> // InstanceType<typeof GitHub>
+type GithubClient = ReturnType<typeof github.getOctokit> // InstanceType<typeof GitHub>
 
 export type IssueCreateCommentResponse = RestEndpointMethodTypes['issues']['createComment']['response']['data']
 export type IssueUpdateCommentResponse = RestEndpointMethodTypes['issues']['updateComment']['response']['data']
@@ -18,7 +18,7 @@ type GetUserForTeamsResponse = Record<string, string[]>
 
 function buildOctokit(token: string, opts: OctokitOptions = {}): GithubClient {
   const debugStr = getInput('debug', 'false').toLowerCase()
-  return getOctokit(token, {
+  return github.getOctokit(token, {
     debug: debugStr === 'true' || debugStr === '1',
     ...opts
   })
@@ -99,9 +99,8 @@ class Client {
   }
 
   #validateAPIResponse<T>(errMsg: string, response: OctokitResponse<T>): T {
-    // console.debug(response)
     if (!response) {
-      console.error(response)
+      core.error(`GitHub API Failed(${errMsg}: ${JSON.stringify(response)}`)
       throw new Error(errMsg)
     }
     return response.data
@@ -230,7 +229,6 @@ class Client {
 
   #tryGetChangedFiles(): string[] | undefined {
     try {
-      core.debug(`PR_CHANGED_FILES: ${process.env.PR_CHANGED_FILES || ''}`)
       const changedFiles = JSON.parse(process.env.PR_CHANGED_FILES || '') as string[]
       core.debug('Fetched PR Changed files from env')
       return changedFiles

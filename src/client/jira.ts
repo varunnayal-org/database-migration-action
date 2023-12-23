@@ -216,9 +216,9 @@ class Client {
 
     /*
     {
-      id: '196000',
+      id: '{number}',
       key: '{projectKey}-1',
-      self: 'https://slicepay.atlassian.net/rest/api/2/issue/196000'
+      self: 'https://{org}.atlassian.net/rest/api/2/issue/{number}'
     }
     */
     return issue as JiraIssue

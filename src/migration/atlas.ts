@@ -54,7 +54,7 @@ async function lint(
     if (ex.message.startsWith('[')) {
       return AtlasLintResponse.build(ex.message, migrationConfig.relativeDir, skipErrorCodeList, lintCodePrefixes)
     }
-    core.info(`ErrorLint[tmp_dir=${migrationConfig.relativeDir}]: ${ex} ${ex.stack}`)
+    core.error(`ErrorLint[tmp_dir=${migrationConfig.relativeDir}]: ${ex} ${ex.stack}`)
     return AtlasLintResponse.fromError(ex.message, migrationConfig.relativeDir)
   }
 }
@@ -93,7 +93,7 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
     if (ex.message.startsWith('[')) {
       return AtlasMigrationExecutionResponse.build(ex.message)
     }
-    core.info(`ErrorApply[tmp_dir=${migrationConfig.dir}]: ${ex} ${ex.stack}`)
+    core.error(`ErrorApply[tmp_dir=${migrationConfig.dir}]: ${ex} ${ex.stack}`)
     return AtlasMigrationExecutionResponse.fromError(ex.message)
   }
 }

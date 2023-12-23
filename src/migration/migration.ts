@@ -27,7 +27,7 @@ async function ensureSQLFilesInMigrationDir(sourceDir: string, destinationDir: s
   // Filter only SQL files
   const sqlFiles = files.filter(file => path.extname(file) === '.sql')
 
-  core.debug(`SQL Files: \n\t${sqlFiles.join('\n\t')}\n`)
+  core.info(`SQL Files: \n\t${sqlFiles.join('\n\t')}\n`)
   // Copy files to the destination dir
   for (const file of sqlFiles) {
     const filePath = path.join(sourceDir, file)
@@ -139,7 +139,9 @@ async function runLintFromList(
     lintResponseList.push(lintResponse)
   }
 
-  return { lintResponseList, errMsg, canSkipAllErrors }
+  const response: MigrationLintResponse = { lintResponseList, errMsg, canSkipAllErrors }
+  core.info(`MigrationLintResponse: ${JSON.stringify(response, null, 2)}`)
+  return response
 }
 
 async function runMigrationFromList(
@@ -168,7 +170,7 @@ async function runMigrationFromList(
     executionResponseList: migrationResponseList,
     errMsg
   }
-  core.debug(`MigrationRunListResponse: ${JSON.stringify(response, null, 2)}`)
+  core.info(`MigrationRunListResponse: ${JSON.stringify(response, null, 2)}`)
   return response
 }
 

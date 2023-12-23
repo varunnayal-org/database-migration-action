@@ -43,7 +43,7 @@ export async function run(): Promise<void> {
 
   config.baseBranch = event.payload.repository.default_branch
 
-  core.debug(
+  core.info(
     `Event: ${eventName}, Action: ${event.payload.action} on baseBranch=${config.baseBranch}, canProcess=${process}`
   )
 

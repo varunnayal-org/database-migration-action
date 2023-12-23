@@ -53,6 +53,17 @@ describe('TexBuilder', () => {
   describe('build()', () => {
     const testCases: BuildTextParams[] = [
       {
+        name: 'should print migration execution on successful',
+        args: {
+          migrationAvailable: true,
+          executionResponseList: [AtlasMigrationExecutionResponse.build(c.executionMap.successful_migration)],
+          errMsg: undefined
+        },
+        github:
+          '✅ **Migrations successful** 12/22/2023, 8:45:06 AM [View](https://github.com/org/repo/actions/runs/11/attempts/22)\n*Directory*: **migrations**\n| Status | File | Executed Statements | Error | Error Statement |\n| --- | --- | --- | --- | --- |\n|✅|20231129060014_add_user.sql|2|-|-|\n|✅|20231206212844_add_column.sql|1|-|-|\n\n\n<details><summary>SQL Statements</summary>\n\n```sql\n-- DIRECTORY: migrations\n-- File: 20231129060014_add_user.sql\nCREATE TABLE users (id uuid NOT NULL, PRIMARY KEY ("id"));\nALTER TABLE "users" ADD COLUMN "phone" varchar(13);\n\n-- File: 20231206212844_add_column.sql\nALTER TABLE "users" ADD COLUMN "email" varchar(255);\n```\n</details>',
+        jira: '(/) *Migrations successful* 12/22/2023, 8:45:06 AM [View|https://github.com/org/repo/actions/runs/11/attempts/22]\n_Directory_: *migrations*\n||Status||File||Executed Statements||Error||Error Statement||\n|(/)|20231129060014_add_user.sql|2|-|-|\n|(/)|20231206212844_add_column.sql|1|-|-|\n\n\n{code:title=SQL Statements|borderStyle=solid}\n-- DIRECTORY: migrations\n-- File: 20231129060014_add_user.sql\nCREATE TABLE users (id uuid NOT NULL, PRIMARY KEY ("id"));\nALTER TABLE "users" ADD COLUMN "phone" varchar(13);\n\n-- File: 20231206212844_add_column.sql\nALTER TABLE "users" ADD COLUMN "email" varchar(255);\n{code}'
+      },
+      {
         name: 'should return no migration available',
         args: {
           migrationAvailable: false,
@@ -84,17 +95,6 @@ describe('TexBuilder', () => {
         github:
           '❌ **Migrations failed** 12/22/2023, 8:45:06 AM [View](https://github.com/org/repo/actions/runs/11/attempts/22)\n> should print error with execution errors\n\n*Directory*: **migrations**: No migration available\n\n\n<details><summary>SQL Statements</summary>\n\n```sql\n-- DIRECTORY: migrations\n    -- No migration available\n```\n</details>',
         jira: '(x) *Migrations failed* 12/22/2023, 8:45:06 AM [View|https://github.com/org/repo/actions/runs/11/attempts/22]\n{quote}\nshould print error with execution errors\n{quote}\n_Directory_: *migrations*: No migration available\n\n\n{code:title=SQL Statements|borderStyle=solid}\n-- DIRECTORY: migrations\n    -- No migration available\n{code}'
-      },
-      {
-        name: 'should print migration execution on successful',
-        args: {
-          migrationAvailable: true,
-          executionResponseList: [AtlasMigrationExecutionResponse.build(c.executionMap.successful_migration)],
-          errMsg: undefined
-        },
-        github:
-          '✅ **Migrations successful** 12/22/2023, 8:45:06 AM [View](https://github.com/org/repo/actions/runs/11/attempts/22)\n*Directory*: **migrations**\n| Status | File | Executed Statements | Error | Error Statement |\n| --- | --- | --- | --- | --- |\n|✅|20231129060014_add_user.sql|2|-|-|\n|✅|20231206212844_add_column.sql|1|-|-|\n\n\n<details><summary>SQL Statements</summary>\n\n```sql\n-- DIRECTORY: migrations\n-- File: 20231129060014_add_user.sql\nCREATE TABLE users (id uuid NOT NULL, PRIMARY KEY ("id"));\nALTER TABLE "users" ADD COLUMN "phone" varchar(13);\n\n-- File: 20231206212844_add_column.sql\nALTER TABLE "users" ADD COLUMN "email" varchar(255);\n```\n</details>',
-        jira: '(/) *Migrations successful* 12/22/2023, 8:45:06 AM [View|https://github.com/org/repo/actions/runs/11/attempts/22]\n_Directory_: *migrations*\n||Status||File||Executed Statements||Error||Error Statement||\n|(/)|20231129060014_add_user.sql|2|-|-|\n|(/)|20231206212844_add_column.sql|1|-|-|\n\n\n{code:title=SQL Statements|borderStyle=solid}\n-- DIRECTORY: migrations\n-- File: 20231129060014_add_user.sql\nCREATE TABLE users (id uuid NOT NULL, PRIMARY KEY ("id"));\nALTER TABLE "users" ADD COLUMN "phone" varchar(13);\n\n-- File: 20231206212844_add_column.sql\nALTER TABLE "users" ADD COLUMN "email" varchar(255);\n{code}'
       },
       {
         name: 'should print migration execution when some migrations failed',

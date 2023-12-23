@@ -6,6 +6,7 @@ import { TextBuilder } from './formatting/text-builder'
 import { getDirectoryForDb } from './migration/migration'
 import { GithubNotifyResponse, ITextBuilder, MigrationMeta, NotifyParams, NotifyResponse } from './types'
 import * as gha from './types.gha'
+import { formatterMap } from './formatting/formatters'
 
 export class NotifierService {
   #dryRun: boolean
@@ -50,8 +51,8 @@ Unmatched Files:
     return summaryText
   }
 
-  async buildGithubComment(builder: TextBuilder, params: NotifyParams): Promise<GithubNotifyResponse> {
-    const githubSummaryText = this.#buildSummary(builder.platform.github, params)
+  async buildGithubComment(builder: ITextBuilder, params: NotifyParams): Promise<GithubNotifyResponse> {
+    const githubSummaryText = this.#buildSummary(builder, params)
     core.summary.addRaw(githubSummaryText)
 
     let ghCommentPromise: Promise<GithubNotifyResponse>
@@ -65,7 +66,7 @@ Unmatched Files:
     } else {
       ghCommentPromise = this.#ghClient.addComment(
         this.#pr.number,
-        `Executed By: ${builder.getFormatter('github').userRef(this.#migrationMeta.triggeredBy.login)}\r\nReason=${
+        `Executed By: ${formatterMap.github.userRef(this.#migrationMeta.triggeredBy.login)}\r\nReason=${
           this.#migrationMeta.eventName
         }.${this.#migrationMeta.actionName}\r\n${githubSummaryText}`
       )
@@ -138,7 +139,7 @@ Unmatched Files:
       this.#config.databases.map(db => getDirectoryForDb(this.#config.baseDirectory, db))
     )
 
-    const ghCommentPromise = this.buildGithubComment(builder, params)
+    const ghCommentPromise = this.buildGithubComment(builder.platform.github, params)
     const [jiraIssuePromise, jiraCommentPromise] = await this.buildJiraComment(builder.platform.jira, params)
 
     const response = await Promise.allSettled([
