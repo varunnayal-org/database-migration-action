@@ -1,7 +1,8 @@
 /* eslint-disable jest/valid-title, @typescript-eslint/no-explicit-any, @typescript-eslint/unbound-method */
 
+import * as github from '@actions/github'
 import GithubClient from '../src/client/github'
-import JiraClient, { JiraComment, Config as JiraConfig, JiraIssue } from '../src/client/jira'
+import JiraClient, { JiraComment, JiraIssue } from '../src/client/jira'
 import { Config } from '../src/config'
 import { LINT_CODE_DEFAULT_PREFIXES } from '../src/constants'
 import { Platform, formatterMap } from '../src/formatting/formatters'
@@ -65,8 +66,13 @@ describe('NotifierService', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     // Create instances of the mocked classes
-    mockGithubClient = new GithubClient('') as jest.Mocked<GithubClient>
-    mockJiraClient = new JiraClient('', '', {} as unknown as JiraConfig) as jest.Mocked<JiraClient>
+    mockGithubClient = new GithubClient(github.getOctokit('token')) as jest.Mocked<GithubClient>
+    mockJiraClient = {
+      findIssue: jest.fn(),
+      createIssue: jest.fn(),
+      addComment: jest.fn()
+    } as any as jest.Mocked<JiraClient>
+
     mockTextBuilder = new TextBuilder(true, '', '', []) as jest.Mocked<TextBuilder>
     mockGithubBuilder = mockTextBuilder.platform.github as jest.Mocked<ITextBuilder>
     mockJiraBuilder = mockTextBuilder.platform.jira as jest.Mocked<ITextBuilder>
@@ -480,13 +486,11 @@ describe('NotifierService', () => {
       await svc.notify(notifyParams)
 
       expect(mockBuildGithubComment).toHaveBeenCalledTimes(1)
+      // Cannot have these checks as mocking TextBuilder and notify creates a new instance of TextBuilder
+      expect(mockBuildGithubComment).toHaveBeenCalledWith(expect.anything(), notifyParams)
 
       expect(mockBuildJiraComment).toHaveBeenCalledTimes(1)
-
-      // // Cannot have these checks as mocking TextBuilder
-      // // and notify creates a new instance of TextBuilder
-      // expect(mockBuildGithubComment).toHaveBeenCalledWith(mockTextBuilder.platform.github, params)
-      // expect(mockBuildJiraComment).toHaveBeenCalledWith(mockJiraBuilder, params)
+      expect(mockBuildJiraComment).toHaveBeenCalledWith(expect.anything(), notifyParams)
     })
 
     describe('should throw error if github or jira fails', () => {

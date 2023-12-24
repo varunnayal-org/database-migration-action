@@ -117,30 +117,45 @@ class Client {
   #fields: CustomFields
   #api: JiraApi
 
-  constructor(username: string, token: string, config: Config) {
-    const { host, project } = config
+  constructor(api: JiraApi, config: Config) {
+    const { project } = config
 
-    if (!username || !token || !host || !project) {
-      throw new Error('Missing required arguments')
+    if (!project) {
+      throw new Error('Jira config missing project')
     }
 
     this.#project = project
     this.#ticketLabel = config.label || ''
     this.#issueType = config.issueType || 'Task'
     this.#fields = config.fields || {}
-    this.#api = new JiraApi({
-      protocol: 'https',
-      host,
-      username,
-      password: token,
-      apiVersion: '2',
-      strictSSL: true
-    })
+    this.#api = api
   }
 
   static fromEnv(config?: Config): Client | null {
     if (config) {
-      return new Client(getInput('jira_username'), getInput('jira_password'), config)
+      if (!config.host) {
+        throw new Error('Jira config missing host')
+      }
+      const username = getInput('jira_username', 'na')
+      if (username === 'na') {
+        throw new Error('Jira config missing username')
+      }
+      const password = getInput('jira_password', 'na')
+      if (password === 'na') {
+        throw new Error('Jira config missing password')
+      }
+
+      return new Client(
+        new JiraApi({
+          protocol: 'https',
+          host: config.host,
+          username,
+          password,
+          apiVersion: '2',
+          strictSSL: true
+        }),
+        config
+      )
     }
     return null
   }
@@ -163,7 +178,7 @@ class Client {
     if (response.issues.length === 0) {
       return null
     } else if (response.issues.length > 1) {
-      throw new Error(`Found multiple tickets for ${searchText}`)
+      throw new Error(`Found multiple tickets for ${jql}`)
     }
     return response.issues[0]
   }

@@ -30,12 +30,12 @@ class Client {
   #repoName = ''
   #client: GithubClient
 
-  constructor(repoToken: string, opts?: OctokitOptions) {
-    this.#client = buildOctokit(repoToken, opts)
+  constructor(client: GithubClient) {
+    this.#client = client
   }
 
   static fromEnv(opts?: OctokitOptions): Client {
-    return new Client(getInput('repo_token'), opts)
+    return new Client(buildOctokit(getInput('repo_token'), opts))
   }
 
   setOrg(organization: string, repoOwner: string, repoName: string): this {
@@ -100,8 +100,9 @@ class Client {
 
   #validateAPIResponse<T>(errMsg: string, response: OctokitResponse<T>): T {
     if (!response) {
-      core.error(`GitHub API Failed(${errMsg}: ${JSON.stringify(response)}`)
-      throw new Error(errMsg)
+      const msg = `GitHub API Failed(${errMsg})`
+      core.error(msg)
+      throw new Error(msg)
     }
     return response.data
   }
@@ -116,7 +117,7 @@ class Client {
     const query = `query($owner: String!, $repoName: String!, $prNumber: Int!) {
   repository(owner: $owner, name: $repoName) {
     pullRequest(number: $prNumber) {
-      reviews(first: 20, states: APPROVED) {
+      reviews(last: 20, states: APPROVED) {
         nodes {
           author {
             login
