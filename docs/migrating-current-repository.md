@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-1. Setup Postgres locally at port 5432 with credentials as user=`admin` and password=`pass`
+1. Setup Postgres locally at port 5432 with credentials as user=`root` and password=`secret`
     > We need two databases
     > - DB for the application, say `app-db`
     > - DB for the same application, say `app-db1`. Used to run the initial migration that is generated
@@ -17,17 +17,17 @@
 
 ```env
 # Should be an empty database
-LOCAL_DB="postgres://admin:pass@localhost:5432/app-svc?sslmode=disable"
-LOCAL_DB1="postgres://admin:pass@localhost:5432/app-svc1?sslmode=disable"
+LOCAL_DB="postgres://root:secret@localhost:5432/app-svc?sslmode=disable"
+LOCAL_DB1="postgres://root:secret@localhost:5432/app-svc1?sslmode=disable"
 
 MIGRATION_DIR=migrations
 
 # Your production/test/development database
 # **NOTE**: Credentials should be for migraiton user
-REMOTE_DB="postgres://{user}:{pass}@{host}:{port}/{db-name}"
+REMOTE_DB="postgres://{user}:{secret}@{host}:{port}/{db-name}"
 
 # Not to be confused with development database
-DEV_DB="postgres://admin:pass@localhost:5432/dev_db?sslmode=disable"
+DEV_DB="postgres://root:secret@localhost:5432/dev_db?sslmode=disable"
 
 SCHEMA=public
 ```
