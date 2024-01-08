@@ -1,30 +1,29 @@
-import * as github from '@actions/github'
 import * as core from '@actions/core'
-import { getInput } from '../util'
-// eslint-disable-next-line import/no-unresolved
-import { OctokitOptions } from '@octokit/core/dist-types/types'
 // eslint-disable-next-line import/named
 import { RestEndpointMethodTypes } from '@octokit/rest'
 // eslint-disable-next-line import/no-unresolved
 import { OctokitResponse } from '@octokit/types'
+import {
+  GHClient,
+  IssueCreateCommentResponse,
+  IssueUpdateCommentResponse,
+  PullRequestUpdateResponse,
+  IssueAddLabelResponse,
+  GetUserForTeamsResponse,
+  GithubClient
+} from '../../src/types.gha'
 
-type GithubClient = ReturnType<typeof github.getOctokit> // InstanceType<typeof GitHub>
+// type GithubClient = ReturnType<typeof github.getOctokit> // InstanceType<typeof GitHub>
 
-export type IssueCreateCommentResponse = RestEndpointMethodTypes['issues']['createComment']['response']['data']
-export type IssueUpdateCommentResponse = RestEndpointMethodTypes['issues']['updateComment']['response']['data']
-export type PullRequestUpdateResponse = RestEndpointMethodTypes['pulls']['update']['response']['data']
-type IssueAddLabelResponse = RestEndpointMethodTypes['issues']['addLabels']['response']['data']
-type GetUserForTeamsResponse = Record<string, string[]>
+// function buildOctokit(token: string, opts: OctokitOptions = {}): GithubClient {
+//   const debugStr = getInput('debug', 'false').toLowerCase()
+//   return github.getOctokit(token, {
+//     debug: debugStr === 'true' || debugStr === '1',
+//     ...opts
+//   })
+// }
 
-function buildOctokit(token: string, opts: OctokitOptions = {}): GithubClient {
-  const debugStr = getInput('debug', 'false').toLowerCase()
-  return github.getOctokit(token, {
-    debug: debugStr === 'true' || debugStr === '1',
-    ...opts
-  })
-}
-
-class Client {
+class Client implements GHClient {
   #organization = ''
   #repoOwner = ''
   #repoName = ''
@@ -32,10 +31,6 @@ class Client {
 
   constructor(client: GithubClient) {
     this.#client = client
-  }
-
-  static fromEnv(opts?: OctokitOptions): Client {
-    return new Client(buildOctokit(getInput('repo_token'), opts))
   }
 
   setOrg(organization: string, repoOwner: string, repoName: string): this {
@@ -193,6 +188,7 @@ class Client {
       return undefined
     }
   }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getPRInformation(prNumber: number): Promise<any> {
     const pr =

@@ -1,6 +1,107 @@
-import { IssueCreateCommentResponse, IssueUpdateCommentResponse, PullRequestUpdateResponse } from './client/github'
-import { JiraComment, JiraIssue } from './client/jira'
-import { User } from './types.gha'
+// eslint-disable-next-line import/no-unresolved
+import { OctokitOptions } from '@octokit/core/dist-types/types'
+
+import { Config as JiraConfig, JiraClient, JiraComment, JiraIssue } from './types.jira'
+import {
+  User,
+  PullRequest,
+  GHClient,
+  IssueCreateCommentResponse,
+  IssueUpdateCommentResponse,
+  PullRequestUpdateResponse
+} from './types.gha'
+import { VaultClient } from './client/vault/types'
+
+/**
+ * Represents the configuration options for the database migration action.
+ */
+export interface Config {
+  /**
+   * Name of the service.
+   */
+  serviceName: string
+
+  /**
+   * Directory where migrations are present.
+   */
+  baseDirectory: string
+
+  /**
+   * Label to add on PR.
+   */
+  prLabel: string
+
+  /**
+   * GitHub teams allowed to approve PR.
+   */
+  approvalTeams: string[]
+
+  /**
+   * GitHub teams that own the repository.
+   */
+  ownerTeams: string[]
+
+  /**
+   * Configuration options for the databases.
+   */
+  databases: DatabaseConfig[]
+
+  // These are filled by code
+
+  /**
+   * Base branch to which merging should occur.
+   */
+  baseBranch: string
+
+  /**
+   * Combination of approvalTeams and ownerTeams.
+   */
+  allTeams: string[]
+
+  /**
+   * Name of the config file.
+   */
+  configFileName: string
+
+  /**
+   * List of secrets to fetch from AWS Secrets Manager. Generated from "databases.*.envName".
+   */
+  dbSecretNameList: string[]
+
+  /**
+   * URL of the development database used for linting.
+   */
+  devDBUrl: string
+
+  /**
+   * Configuration options for JIRA integration.
+   */
+  jira?: JiraConfig
+
+  /**
+   * An array of prefixes for lint error codes.
+   *
+   * This property is of type `string[]`. It is used to categorize lint errors based on their code prefix.
+   * By convention, the lint error's code prefix can be used to determine the type or category of the error.
+   */
+  lintCodePrefixes: string[]
+
+  /**
+   * Represents the prefix for the label of lint errors that can be skipped.
+   *
+   * This property is of type `string`. It is used to identify lint errors that can be skipped
+   * based on their label. By convention, any lint error whose label starts with this prefix
+   * can be skipped.
+   */
+  lintSkipErrorLabelPrefix: string
+}
+
+export interface DatabaseConfig {
+  directory: string
+  schema: string
+  baseline?: string
+  envName: string
+}
 
 /**
  * Represents an error that occurred when validating a changed file.
@@ -584,4 +685,66 @@ export type NotifyParams = {
    * Indicates whether to close the PR.
    */
   closePR?: boolean
+}
+
+export interface Notifier {
+  notify(params: NotifyParams): Promise<NotifyResponse>
+}
+
+export interface Builder {
+  /**
+   * Returns a hydrated vault client ready to use for GitHub Actions.
+   * If an AWS secret store is configured, it creates an AWSClient using the SecretsManagerClient
+   * from the AWS SDK and the specified secret store. Otherwise, it throws an error.
+   *
+   * @returns A vault client.
+   * @throws {Error} If no vault is configured.
+   */
+  getVault(): VaultClient
+
+  /**
+   * Builds JIRA client
+   *
+   * @param config - An optional parameter of type `JiraConfig`. This represents the configuration for the Jira client.
+   *
+   * @returns A `JiraClient` object if the configuration is valid, or `null` if the configuration is not valid or not provided.
+   * @throws {Error} If invalid configuration is provided.
+   *
+   * This method is used to get a Jira client. If a `JiraConfig` is provided and is valid, a `JiraClient` object is returned. If the `JiraConfig` is not provided or is not valid, `null` is returned.
+   */
+  getJira(config?: JiraConfig): JiraClient | null
+
+  /**
+   * Builds Github Client
+   *
+   * @param opts - An optional parameter of type `OctokitOptions`. This represents the options for the Octokit client.
+   *
+   * @returns A `GHClient` object.
+   * @throws {Error} If invalid configuration is provided.
+   *
+   */
+  getGithub(opts?: OctokitOptions): GHClient
+
+  /**
+   * `getNotifier` is a method in the `factory.ts` file.
+   *
+   * @param dryRun - A boolean indicating whether the notifier service should run in dry run mode.
+   * @param pr - A `PullRequest` object representing the pull request.
+   * @param migrationMeta - A `MigrationMeta` object representing the migration metadata.
+   * @param config - A `Config` object representing the configuration.
+   * @param ghClient - A `GHClient` object representing the GitHub client.
+   * @param jiraClient - A `JiraClient` object or null representing the Jira client.
+   *
+   * @returns A `Notifier` object.
+   *
+   * This method is used to create a new `NotifierService` object with the specified parameters.
+   */
+  getNotifier(
+    dryRun: boolean,
+    pr: PullRequest,
+    migrationMeta: MigrationMeta,
+    config: Config,
+    ghClient: GHClient,
+    jiraClient: JiraClient | null
+  ): Notifier
 }

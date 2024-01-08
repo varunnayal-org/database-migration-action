@@ -1,19 +1,25 @@
 import * as core from '@actions/core'
-import GHClient from './client/github'
-import JiraClient, { JiraComment, JiraIssue } from './client/jira'
-import { Config } from './config'
 import { TextBuilder } from './formatting/text-builder'
 import { getDirectoryForDb } from './migration/migration'
-import { GithubNotifyResponse, ITextBuilder, MigrationMeta, NotifyParams, NotifyResponse } from './types'
+import {
+  Config,
+  GithubNotifyResponse,
+  ITextBuilder,
+  MigrationMeta,
+  Notifier,
+  NotifyParams,
+  NotifyResponse
+} from './types'
 import * as gha from './types.gha'
+import { JiraClient, JiraComment, JiraIssue } from './types.jira'
 import { formatterMap } from './formatting/formatters'
 
-export class NotifierService {
+export class NotifierService implements Notifier {
   #dryRun: boolean
   #pr: gha.PullRequest
   #migrationMeta: MigrationMeta
   #config: Config
-  #ghClient: GHClient
+  #ghClient: gha.GHClient
   #jiraClient: JiraClient | null
 
   constructor(
@@ -21,7 +27,7 @@ export class NotifierService {
     pr: gha.PullRequest,
     migrationMeta: MigrationMeta,
     config: Config,
-    ghClient: GHClient,
+    ghClient: gha.GHClient,
     jiraClient: JiraClient | null
   ) {
     this.#dryRun = dryRun

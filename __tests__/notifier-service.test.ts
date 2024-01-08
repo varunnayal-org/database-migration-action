@@ -2,14 +2,14 @@
 
 import * as github from '@actions/github'
 import GithubClient from '../src/client/github'
-import JiraClient, { JiraComment, JiraIssue } from '../src/client/jira'
-import { Config } from '../src/config'
+import JiraClient from '../src/client/jira'
 import { LINT_CODE_DEFAULT_PREFIXES } from '../src/constants'
 import { Platform, formatterMap } from '../src/formatting/formatters'
 import { TextBuilder } from '../src/formatting/text-builder'
 import { AtlasLintResponse, AtlasMigrationExecutionResponse } from '../src/migration/atlas-class'
 import { NotifierService } from '../src/notifier.service'
 import {
+  Config,
   ChangedFileValidationError,
   ITextBuilder,
   MigrationLintResponse,
@@ -17,6 +17,7 @@ import {
   MigrationRunListResponse,
   NotifyParams
 } from '../src/types'
+import { JiraComment, JiraIssue } from '../src/types.jira'
 import * as gha from '../src/types.gha'
 import * as c from './common'
 

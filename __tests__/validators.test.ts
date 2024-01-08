@@ -1,4 +1,4 @@
-import { Config, JiraIssue } from '../src/client/jira'
+import { Config, JiraIssue } from '../src/types.jira'
 import { MatchTeamWithPRApproverResult, MigrationConfig, MigrationMeta } from '../src/types'
 import * as gha from '../src/types.gha'
 import {

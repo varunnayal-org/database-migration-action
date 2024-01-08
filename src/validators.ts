@@ -2,10 +2,10 @@ import path from 'path'
 import * as core from '@actions/core'
 
 import { ChangedFileValidationError, MatchTeamWithPRApproverResult, MigrationConfig, MigrationMeta } from './types'
-import * as gha from './types.gha'
 import * as util from './util'
 import { CMD_DRY_RUN, NO_MIGRATION_AVAILABLE, UNWANTED_FILES_FOUND } from './constants'
-import { Config, JiraIssue } from './client/jira'
+import { Config, JiraIssue } from './types.jira'
+import * as gha from './types.gha'
 
 export function validatePullRequest(pullRequest: gha.PullRequest, baseBranch: string): string | undefined {
   const { base } = pullRequest

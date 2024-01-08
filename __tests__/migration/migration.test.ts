@@ -1,50 +1,15 @@
 import mock from 'mock-fs'
 import fs from 'fs/promises'
-import path from 'path'
 
 import * as atlas from '../../src/migration/atlas'
 import * as migration from '../../src/migration/migration'
-import { MigrationConfig, MigrationRunListResponse } from '../../src/types'
+import { DatabaseConfig, MigrationConfig, MigrationRunListResponse } from '../../src/types'
 import { SecretMap } from '../../src/client/vault/types'
-import { DatabaseConfig } from '../../src/config'
-import { AtlasMigrationExecutionResponse } from '../../src/migration/atlas-class'
+import { AtlasLintResponse, AtlasMigrationExecutionResponse } from '../../src/migration/atlas-class'
 import * as c from '../common'
-import { TEMP_DIR_FOR_MIGRATION } from '../../src/constants'
+import { LINT_CODE_DEFAULT_PREFIXES, TEMP_DIR_FOR_MIGRATION } from '../../src/constants'
 
 let atlasRun: jest.SpyInstance
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const getMockDirectories = (): Record<string, any> => ({
-  [`${TEMP_DIR_FOR_MIGRATION}`]: mock.directory(),
-  migrations: {
-    'readme.md': '# Readme',
-    'other_file.txt': 'test file',
-    '00000000000001_create_test_table.sql': 'create table test(id int);',
-    '00000000000002_create_test2_table.sql': 'create table test2(id int);'
-  },
-  multi_db_dir: {
-    db1: {
-      'atlas.hcl': 'lint { }',
-      'readme_db1.md': '# Readme',
-      '00000000000005_create_test5_table.sql': 'create table test5(id int);',
-      '00000000000006_create_test6_table.sql': 'create table test6(id int);'
-    },
-    db2: {
-      'atlas.hcl': 'lint { }',
-      'readme_db2.md': '# Readme',
-      '00000000000007_create_test7_table.sql': 'create table tes7(id int);',
-      '00000000000008_create_test8_table.sql': 'create table test8(id int);',
-      '00000000000009_create_test9_table.sql': 'create table test9(id int);'
-    },
-    db3: {
-      'atlas.hcl': 'lint { }',
-      'readme_db3.md': '# Readme',
-      '00000000000010_create_test10_table.sql': 'create table tes10(id int);',
-      '00000000000011_create_test11_table.sql': 'create table test11(id int);',
-      '00000000000012_create_test12_table.sql': 'create table test12(id int);'
-    }
-  }
-})
 
 const getDB = (directory = '.', envName = 'test', schema = 'public'): DatabaseConfig => ({
   directory,
@@ -54,31 +19,13 @@ const getDB = (directory = '.', envName = 'test', schema = 'public'): DatabaseCo
 
 const getVaultKeyStore = (...names: string[]): SecretMap =>
   names.length === 0 ? { test: 'test' } : names.reduce((acc, name) => ({ ...acc, [name]: name }), {})
-const getExpectedMigrationConfigList = (
-  dir = '.',
-  databaseUrl = 'test',
-  baseDir = 'migrations',
-  schema = 'public',
-  devUrl = 'test'
-): MigrationConfig[] => [
-  {
-    dir: path.join(TEMP_DIR_FOR_MIGRATION, dir),
-    originalDir: path.join(baseDir, dir),
-    relativeDir: path.join(baseDir, dir),
-    databaseUrl,
-    schema,
-    baseline: undefined,
-    dryRun: true,
-    devUrl
-  }
-]
 
 describe('buildMigrationConfigList', () => {
   const devDBUrl = 'test'
   beforeEach(() => {
     jest.clearAllMocks()
     mock.restore()
-    mock(getMockDirectories())
+    mock(c.getMockDirectories())
   })
 
   afterEach(() => {
@@ -88,13 +35,13 @@ describe('buildMigrationConfigList', () => {
   describe('single_database', () => {
     it('should return migration config list', async () => {
       expect(await migration.buildMigrationConfigList('migrations', [getDB()], devDBUrl, getVaultKeyStore())).toEqual(
-        getExpectedMigrationConfigList()
+        c.getMigrationConfigList()
       )
     })
 
     it('should ignore non sql files', async () => {
       expect(await migration.buildMigrationConfigList('migrations', [getDB()], devDBUrl, getVaultKeyStore())).toEqual(
-        getExpectedMigrationConfigList()
+        c.getMigrationConfigList()
       )
 
       expect(await fs.readdir(TEMP_DIR_FOR_MIGRATION)).toEqual([
@@ -111,10 +58,7 @@ describe('buildMigrationConfigList', () => {
     })
 
     it('should set dry run to passed value', async () => {
-      const migrationConfigList = [
-        ...getExpectedMigrationConfigList(),
-        ...getExpectedMigrationConfigList('dir2', 'key2')
-      ]
+      const migrationConfigList = [...c.getMigrationConfigList(), ...c.getMigrationConfigList('dir2', 'key2')]
 
       expect(migrationConfigList.every(config => config.dryRun === true)).toBe(true)
       migration.setDryRun(migrationConfigList, false)
@@ -129,8 +73,8 @@ describe('buildMigrationConfigList', () => {
     beforeEach(async () => {
       dbs = [getDB('db1', 'db1_key'), getDB('db2', 'db2_key')]
       expectedMigrationConfigList = [
-        ...getExpectedMigrationConfigList('db1', 'db1_credentials', 'multi_db_dir'),
-        ...getExpectedMigrationConfigList('db2', 'db2_credentials', 'multi_db_dir')
+        ...c.getMigrationConfigList('db1', 'db1_credentials', 'multi_db_dir'),
+        ...c.getMigrationConfigList('db2', 'db2_credentials', 'multi_db_dir')
       ]
       vaultKeyStore = {
         db1_key: 'db1_credentials',
@@ -193,7 +137,7 @@ describe('runMigrationFromList', () => {
 
   describe('single_database', () => {
     it('should return no migration available', async () => {
-      const migrationConfigList = getExpectedMigrationConfigList()
+      const migrationConfigList = c.getMigrationConfigList()
       const atlasRunFn = atlasRun.mockResolvedValue(getAtlasRunResponseForEmptyString)
 
       const response = await migration.runMigrationFromList(migrationConfigList, true)
@@ -213,7 +157,7 @@ describe('runMigrationFromList', () => {
     })
 
     it('should return response', async () => {
-      const migrationConfigList = getExpectedMigrationConfigList()
+      const migrationConfigList = c.getMigrationConfigList()
 
       const atlasRunFn = atlasRun.mockResolvedValue(getAtlasSuccessfulRunResponse())
 
@@ -238,14 +182,14 @@ describe('runMigrationFromList', () => {
     let migrationConfigList: MigrationConfig[]
     beforeEach(async () => {
       expectedMigrationConfigList = [
-        ...getExpectedMigrationConfigList('db1', 'db1_credentials', 'multi_db_dir'),
-        ...getExpectedMigrationConfigList('db2', 'db2_credentials', 'multi_db_dir'),
-        ...getExpectedMigrationConfigList('db3', 'db3_credentials', 'multi_db_dir')
+        ...c.getMigrationConfigList('db1', 'db1_credentials', 'multi_db_dir'),
+        ...c.getMigrationConfigList('db2', 'db2_credentials', 'multi_db_dir'),
+        ...c.getMigrationConfigList('db3', 'db3_credentials', 'multi_db_dir')
       ]
       migrationConfigList = [
-        ...getExpectedMigrationConfigList('db1', 'db1_credentials', 'multi_db_dir'),
-        ...getExpectedMigrationConfigList('db2', 'db2_credentials', 'multi_db_dir'),
-        ...getExpectedMigrationConfigList('db3', 'db3_credentials', 'multi_db_dir')
+        ...c.getMigrationConfigList('db1', 'db1_credentials', 'multi_db_dir'),
+        ...c.getMigrationConfigList('db2', 'db2_credentials', 'multi_db_dir'),
+        ...c.getMigrationConfigList('db3', 'db3_credentials', 'multi_db_dir')
       ]
     })
 
@@ -412,5 +356,205 @@ describe('runMigrationFromList', () => {
         })
       }
     })
+  })
+})
+
+describe('runLintFromList', () => {
+  let atlasLint: jest.SpyInstance
+  beforeEach(() => {
+    jest.clearAllMocks()
+    atlasLint = jest.spyOn(atlas, 'lint').mockImplementation()
+  })
+
+  it('should return no error', async () => {
+    const migrationConfig = c.getMigrationConfigList()
+
+    const atlasLintFn = atlasLint.mockResolvedValue(
+      AtlasLintResponse.build(c.artifacts.no_lint_error.lintResponseOutput.mg1, 'mg1', [], LINT_CODE_DEFAULT_PREFIXES)
+    )
+
+    const expectedResponse = {
+      lintResponseList: [
+        {
+          fileLintResults: [],
+          migrationDir: 'mg1',
+          allSkipped: true,
+          firstError: undefined
+        }
+      ],
+      errMsg: undefined,
+      canSkipAllErrors: true
+    }
+
+    const response = await migration.runLintFromList(migrationConfig, [], LINT_CODE_DEFAULT_PREFIXES)
+
+    expect(response).toEqual(expectedResponse)
+    expect(atlasLintFn).toHaveBeenCalledTimes(1)
+    expect(atlasLintFn).toHaveBeenCalledWith(migrationConfig[0], [], LINT_CODE_DEFAULT_PREFIXES)
+  })
+
+  it('should return error', async () => {
+    const migrationConfig = c.getMigrationConfigList()
+
+    const atlasLintFn = atlasLint.mockResolvedValue(
+      AtlasLintResponse.build(
+        c.artifacts.multiple_linting_errors_in_one_file.lintResponseOutput.mg1,
+        'mg1',
+        [],
+        LINT_CODE_DEFAULT_PREFIXES
+      )
+    )
+
+    const expectedResponse = {
+      lintResponseList: [
+        {
+          fileLintResults: [
+            {
+              filename: '20231222064941_step3.sql',
+              diagnostics: [
+                {
+                  message:
+                    'Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction',
+                  errorCode: 'PG103',
+                  errorCodeGroup: 'concurrent index violations detected',
+                  pos: 0,
+                  canSkip: false
+                },
+                {
+                  message: 'Creating index "idx_users_email" non-concurrently causes write locks on the "users" table',
+                  errorCode: 'PG101',
+                  errorCodeGroup: 'concurrent index violations detected',
+                  pos: 0,
+                  canSkip: false
+                }
+              ]
+            }
+          ],
+          migrationDir: 'mg1',
+          allSkipped: false,
+          firstError:
+            'Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction'
+        }
+      ],
+      errMsg:
+        'Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction',
+      canSkipAllErrors: false
+    }
+
+    const response = await migration.runLintFromList(migrationConfig, [], LINT_CODE_DEFAULT_PREFIXES)
+
+    expect(response).toEqual(expectedResponse)
+    expect(atlasLintFn).toHaveBeenCalledTimes(1)
+    expect(atlasLintFn).toHaveBeenCalledWith(migrationConfig[0], [], LINT_CODE_DEFAULT_PREFIXES)
+  })
+
+  it('should skip some errors', async () => {
+    const migrationConfig = c.getMigrationConfigList()
+
+    const atlasLintFn = atlasLint.mockResolvedValue(
+      AtlasLintResponse.build(
+        c.artifacts.multiple_linting_errors_in_one_file.lintResponseOutput.mg1,
+        'mg1',
+        ['PG103'],
+        LINT_CODE_DEFAULT_PREFIXES
+      )
+    )
+
+    const expectedResponse = {
+      lintResponseList: [
+        {
+          fileLintResults: [
+            {
+              filename: '20231222064941_step3.sql',
+              diagnostics: [
+                {
+                  message:
+                    'Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction',
+                  errorCode: 'PG103',
+                  errorCodeGroup: 'concurrent index violations detected',
+                  pos: 0,
+                  canSkip: true
+                },
+                {
+                  message: 'Creating index "idx_users_email" non-concurrently causes write locks on the "users" table',
+                  errorCode: 'PG101',
+                  errorCodeGroup: 'concurrent index violations detected',
+                  pos: 0,
+                  canSkip: false
+                }
+              ]
+            }
+          ],
+          migrationDir: 'mg1',
+          allSkipped: false,
+          firstError:
+            'Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction'
+        }
+      ],
+      errMsg:
+        'Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction',
+      canSkipAllErrors: false
+    }
+
+    const response = await migration.runLintFromList(migrationConfig, ['PG103'], LINT_CODE_DEFAULT_PREFIXES)
+
+    expect(response).toEqual(expectedResponse)
+    expect(atlasLintFn).toHaveBeenCalledTimes(1)
+    expect(atlasLintFn).toHaveBeenCalledWith(migrationConfig[0], ['PG103'], LINT_CODE_DEFAULT_PREFIXES)
+  })
+
+  it('should skip all errors', async () => {
+    const migrationConfig = c.getMigrationConfigList()
+
+    const atlasLintFn = atlasLint.mockResolvedValue(
+      AtlasLintResponse.build(
+        c.artifacts.multiple_linting_errors_in_one_file.lintResponseOutput.mg1,
+        'mg1',
+        ['PG101', 'PG103'],
+        LINT_CODE_DEFAULT_PREFIXES
+      )
+    )
+
+    const expectedResponse = {
+      lintResponseList: [
+        {
+          fileLintResults: [
+            {
+              filename: '20231222064941_step3.sql',
+              diagnostics: [
+                {
+                  message:
+                    'Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction',
+                  errorCode: 'PG103',
+                  errorCodeGroup: 'concurrent index violations detected',
+                  pos: 0,
+                  canSkip: true
+                },
+                {
+                  message: 'Creating index "idx_users_email" non-concurrently causes write locks on the "users" table',
+                  errorCode: 'PG101',
+                  errorCodeGroup: 'concurrent index violations detected',
+                  pos: 0,
+                  canSkip: true
+                }
+              ]
+            }
+          ],
+          migrationDir: 'mg1',
+          allSkipped: true,
+          firstError:
+            'Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction'
+        }
+      ],
+      errMsg:
+        'Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction',
+      canSkipAllErrors: true
+    }
+
+    const response = await migration.runLintFromList(migrationConfig, ['PG101', 'PG103'], LINT_CODE_DEFAULT_PREFIXES)
+
+    expect(response).toEqual(expectedResponse)
+    expect(atlasLintFn).toHaveBeenCalledTimes(1)
+    expect(atlasLintFn).toHaveBeenCalledWith(migrationConfig[0], ['PG101', 'PG103'], LINT_CODE_DEFAULT_PREFIXES)
   })
 })

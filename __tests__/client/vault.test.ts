@@ -2,7 +2,7 @@ import * as core from '@actions/core'
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager'
 
 import AWSClient from '../../src/client/vault/aws'
-import * as factory from '../../src/client/factory'
+import factory from '../../src/factory'
 
 let getInputMock: jest.SpyInstance
 let smSend: jest.SpyInstance
@@ -47,11 +47,11 @@ describe('vault', () => {
       getInputMock = jest.spyOn(core, 'getInput').mockImplementation()
     })
 
-    // Write test cases for getVaultManager() method
+    // Write test cases for getVault() method
     it('return aws secret manager', () => {
       const mock = getInputMock.mockReturnValue('secret-store-arn')
 
-      const client = factory.getVaultManager()
+      const client = factory.getVault()
 
       expect(client).toBeInstanceOf(AWSClient)
       expect(mock).toHaveBeenCalledTimes(1)
@@ -60,7 +60,7 @@ describe('vault', () => {
     it('throw error if no vault configured', () => {
       const mock = getInputMock.mockReturnValue('')
 
-      expect(() => factory.getVaultManager()).toThrow('No vault configured')
+      expect(() => factory.getVault()).toThrow('No vault configured')
       expect(mock).toHaveBeenCalledTimes(1)
     })
   })

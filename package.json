@@ -25,6 +25,7 @@
   },
   "scripts": {
     "bundle": "npm run format:write && npm run package",
+    "circular": "madge --circular --orphans --warning --extensions ts ./src",
     "ci-test": "jest",
     "coverage": "make-coverage-badge --output-path ./badges/coverage.svg",
     "format:write": "prettier --write **/*.ts",
@@ -40,6 +41,7 @@
     "workflow:lint:text": "textlint -c .github/linters/.textlintrc .",
     "workflow:lint": "npm run workflow:lint:md && npm run workflow:lint:text",
     "workflow:check-dist": "act -j check-dist",
+    "all:local": "npm run circular && npm run all",
     "all": "npm run format:write && npm run lint && npm run test && npm run coverage && npm run package"
   },
   "license": "MIT",

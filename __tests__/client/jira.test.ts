@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import Client, { Config } from '../../src/client/jira'
+import Client from '../../src/client/jira'
+import { Config } from '../../src/types.jira'
+import factory from '../../src/factory'
 
 // Mock JiraApi
 jest.mock('jira-client', () => {
@@ -59,28 +61,28 @@ describe('JiraApi', () => {
     describe('required fields', () => {
       it('should error when username is missing', () => {
         delete process.env.INPUT_JIRA_USERNAME
-        expect(() => Client.fromEnv({ ...config })).toThrow('Jira config missing username')
+        expect(() => factory.getJira({ ...config })).toThrow('Jira config missing username')
       })
       it('should error when password is missing', () => {
         delete process.env.INPUT_JIRA_PASSWORD
-        expect(() => Client.fromEnv({ ...config })).toThrow('Jira config missing password')
+        expect(() => factory.getJira({ ...config })).toThrow('Jira config missing password')
       })
       it('should error when host is missing', () => {
-        expect(() => Client.fromEnv({ ...config, host: '' })).toThrow('Jira config missing host')
+        expect(() => factory.getJira({ ...config, host: '' })).toThrow('Jira config missing host')
       })
       it('should error when project is missing', () => {
-        expect(() => Client.fromEnv({ ...config, project: '' })).toThrow('Jira config missing project')
+        expect(() => factory.getJira({ ...config, project: '' })).toThrow('Jira config missing project')
       })
     })
 
     it('should build from env', () => {
       process.env.INPUT_JIRA_USERNAME = 'user'
       process.env.INPUT_JIRA_PASSWORD = 'pass'
-      const client = Client.fromEnv(config)
+      const client = factory.getJira(config)
       expect(client).toBeDefined()
     })
     it('should return null', () => {
-      expect(Client.fromEnv()).toBeNull()
+      expect(factory.getJira()).toBeNull()
     })
   })
 

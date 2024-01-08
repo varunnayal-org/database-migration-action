@@ -2,7 +2,9 @@
 
 import * as core from '@actions/core'
 import * as github from '@actions/github'
+import factory from '../../src/factory'
 import Client from '../../src/client/github'
+import { GHClient } from '../../src/types.gha'
 
 let getInputMock: jest.SpyInstance
 
@@ -31,8 +33,8 @@ describe('github client', () => {
     getOctokit: jest.fn().mockImplementation(() => mockOctokit())
   }))
 
-  function getClient(): Client {
-    const client = Client.fromEnv()
+  function getClient(): GHClient {
+    const client = factory.getGithub()
     client.setOrg('orgName', 'orgOwner', 'repoName')
     return client
   }
@@ -58,7 +60,7 @@ describe('github client', () => {
 
   describe('constructor', () => {
     it('should return github client', () => {
-      const client = Client.fromEnv()
+      const client = factory.getGithub()
 
       expect(client).toBeInstanceOf(Client)
       expect(getInputMock).toHaveBeenCalledTimes(2)
@@ -74,7 +76,7 @@ describe('github client', () => {
         throw new Error(`Unknown input ${name}`)
       })
 
-      expect(() => Client.fromEnv()).toThrow('Input repo_token is not set')
+      expect(() => factory.getGithub()).toThrow('Input repo_token is not set')
       expect(getInputMockFn).toHaveBeenCalledTimes(1)
     })
   })

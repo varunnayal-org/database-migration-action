@@ -3,8 +3,8 @@ import path from 'path'
 import * as core from '@actions/core'
 
 import * as util from '../util'
-import { DatabaseConfig } from '../config'
 import {
+  DatabaseConfig,
   LintExecutionResponse,
   MigrationConfig,
   MigrationExecutionResponse,

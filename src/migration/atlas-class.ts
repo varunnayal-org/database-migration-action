@@ -34,7 +34,7 @@ class AtlasVersionExecutionError implements VersionExecutionError {
   }
 }
 
-class AtlasVersionExecution implements MigrationVersionExecutionResponse {
+export class AtlasVersionExecution implements MigrationVersionExecutionResponse {
   constructor(
     private name: string,
     private version: string,

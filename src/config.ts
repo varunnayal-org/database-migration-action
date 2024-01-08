@@ -1,8 +1,9 @@
 import path from 'path'
 import * as core from '@actions/core'
 import { getInput } from './util'
-import { Config as JIRAConfig } from './client/jira'
+import { Config as JIRAConfig } from './types.jira'
 import {
+  DEFAULT_BASE_BRANCH,
   DEFAULT_JIRA_COMPLETED_STATUS,
   DEFAULT_JIRA_DRI_APPROVAL_STATUS,
   DEFAULT_JIRA_ISSUE_TYPE,
@@ -13,103 +14,14 @@ import {
   LINT_CODE_DEFAULT_PREFIXES,
   LINT_SKIP_ERROR_LABEL_PREFIX
 } from './constants'
-
-/**
- * Represents the configuration options for the database migration action.
- */
-export interface Config {
-  /**
-   * Name of the service.
-   */
-  serviceName: string
-
-  /**
-   * Directory where migrations are present.
-   */
-  baseDirectory: string
-
-  /**
-   * Label to add on PR.
-   */
-  prLabel: string
-
-  /**
-   * GitHub teams allowed to approve PR.
-   */
-  approvalTeams: string[]
-
-  /**
-   * GitHub teams that own the repository.
-   */
-  ownerTeams: string[]
-
-  /**
-   * Combination of approvalTeams and ownerTeams.
-   */
-  allTeams: string[]
-
-  /**
-   * Configuration options for the databases.
-   */
-  databases: DatabaseConfig[]
-
-  // These are filled by code
-
-  /**
-   * Base branch to which merging should occur.
-   */
-  baseBranch: string
-
-  /**
-   * Name of the config file.
-   */
-  configFileName: string
-
-  /**
-   * List of secrets to fetch from AWS Secrets Manager. Generated from "databases.*.envName".
-   */
-  dbSecretNameList: string[]
-
-  /**
-   * URL of the development database used for linting.
-   */
-  devDBUrl: string
-
-  /**
-   * Configuration options for JIRA integration.
-   */
-  jira?: JIRAConfig
-
-  /**
-   * An array of prefixes for lint error codes.
-   *
-   * This property is of type `string[]`. It is used to categorize lint errors based on their code prefix.
-   * By convention, the lint error's code prefix can be used to determine the type or category of the error.
-   */
-  lintCodePrefixes: string[]
-
-  /**
-   * Represents the prefix for the label of lint errors that can be skipped.
-   *
-   * This property is of type `string`. It is used to identify lint errors that can be skipped
-   * based on their label. By convention, any lint error whose label starts with this prefix
-   * can be skipped.
-   */
-  lintSkipErrorLabelPrefix: string
-}
-
-export interface DatabaseConfig {
-  directory: string
-  schema: string
-  baseline?: string
-  envName: string
-}
+import { Config } from './types'
 
 function prepareRuntimeConfig(config: Config, configFileName: string): void {
   config.configFileName = configFileName
   config.devDBUrl = core.getInput('dev_db_url')
   config.lintCodePrefixes = LINT_CODE_DEFAULT_PREFIXES
   config.lintSkipErrorLabelPrefix = config.lintSkipErrorLabelPrefix || LINT_SKIP_ERROR_LABEL_PREFIX
+  config.allTeams = [...new Set([...config.ownerTeams, ...config.approvalTeams])]
 
   config.dbSecretNameList = config.databases.reduce<string[]>((acc, dbConfig, idx) => {
     if (!dbConfig.envName) {
@@ -148,13 +60,11 @@ export default function buildConfig(): Config {
   config.ownerTeams = [...new Set(config.ownerTeams)]
   config.approvalTeams = [...new Set(config.approvalTeams)]
 
-  config.allTeams = [...new Set([...config.ownerTeams, ...config.approvalTeams])]
-
   if (!config.baseDirectory) {
     config.baseDirectory = DEFAULT_MIGRATION_BASE_DIR
   }
   if (!config.baseBranch) {
-    config.baseBranch = 'main'
+    config.baseBranch = DEFAULT_BASE_BRANCH
   }
 
   config.prLabel = config.prLabel || DEFAULT_PR_LABEL

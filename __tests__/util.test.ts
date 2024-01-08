@@ -78,12 +78,14 @@ describe('util', () => {
     }
 
     describe('single migration directory', () => {
+      // eslint-disable-next-line jest/expect-expect
       it('should return matched files', () => {
         const expectedResult = [getFiles('migrations')]
 
         run(['migrations'], expectedResult)
       })
 
+      // eslint-disable-next-line jest/expect-expect
       it('should return matched and unmatched files', () => {
         const expectedResult = [getFiles('migrations')]
         const expectedUnmatchedFiles = [
@@ -96,6 +98,7 @@ describe('util', () => {
         run(['migrations'], expectedResult, expectedUnmatchedFiles)
       })
 
+      // eslint-disable-next-line jest/expect-expect
       it('should return unmatched files', () => {
         const expectedResult = [[]]
 
@@ -117,6 +120,7 @@ describe('util', () => {
     })
 
     describe('multiple migration directory', () => {
+      // eslint-disable-next-line jest/expect-expect
       it('should return matched files', () => {
         const expectedResult = [getFiles('migrations/db1'), getFiles('migrations/db2')]
         const expectedUnmatchedFiles = [
@@ -131,6 +135,7 @@ describe('util', () => {
         run(['migrations/db2', 'migrations/db1'], [expectedResult[1], expectedResult[0]], expectedUnmatchedFiles)
       })
 
+      // eslint-disable-next-line jest/expect-expect
       it('should return matched and unmatched files', () => {
         const expectedResult = [getFiles('migrations/db1'), getFiles('migrations/db2')]
 
@@ -146,6 +151,7 @@ describe('util', () => {
         run(['migrations/db2', 'migrations/db1'], [expectedResult[1], expectedResult[0]], expectedUnmatchedFiles)
       })
 
+      // eslint-disable-next-line jest/expect-expect
       it('should return unmatched files', () => {
         const expectedResult = [[], []]
 
@@ -167,6 +173,7 @@ describe('util', () => {
         run(['migrations/db4', 'abc', 'data'], [[], [], []], expectedUnmatchedFiles)
       })
 
+      // eslint-disable-next-line jest/expect-expect
       it('should return match prefix', () => {
         const expectedResult = [
           [

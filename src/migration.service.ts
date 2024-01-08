@@ -1,15 +1,9 @@
 import * as core from '@actions/core'
-import GHClient from './client/github'
-import JiraClient, { JiraIssue } from './client/jira'
-import { Config } from './config'
 import * as gha from './types.gha'
+import { JiraIssue, JiraClient } from './types.jira'
+import * as migration from './migration/migration'
 import {
-  runMigrationFromList,
-  buildMigrationConfigList,
-  runLintFromList,
-  hydrateMigrationConfigList
-} from './migration/migration'
-import {
+  Config,
   MatchTeamWithPRApproverResult,
   RunMigrationResult,
   MigrationMeta,
@@ -17,24 +11,31 @@ import {
   MigrationConfig,
   ChangedFileValidationError,
   NotifyParams,
-  NotifyResponse
+  NotifyResponse,
+  Builder
 } from './types'
 import { VaultClient } from './client/vault/types'
-import { NotifierService } from './notifier.service'
 import * as validators from './validators'
 import { CMD_DRY_RUN, CMD_DRY_RUN_JIRA, CMD_APPLY, NO_MIGRATION_AVAILABLE } from './constants'
 
 export default class MigrationService {
-  #ghClient: GHClient
+  #ghClient: gha.GHClient
   #jiraClient: JiraClient | null
-  secretClient: VaultClient
+  #secretClient: VaultClient
   #config: Config
+  #factory: Builder
 
-  constructor(config: Config, client: GHClient, jiraClient: JiraClient | null, secretClient: VaultClient) {
+  constructor(config: Config, factory: Builder) {
     this.#config = config
-    this.#ghClient = client
-    this.#jiraClient = jiraClient
-    this.secretClient = secretClient
+    this.#factory = factory
+
+    this.#ghClient = factory.getGithub()
+    this.#jiraClient = factory.getJira(config.jira)
+    this.#secretClient = factory.getVault()
+  }
+
+  init(org: string, repoOwner: string, repoName: string): void {
+    this.#ghClient.setOrg(org, repoOwner, repoName)
   }
 
   #hasLabel(labels: gha.Label[], label: string): boolean {
@@ -98,7 +99,7 @@ export default class MigrationService {
     }
 
     for (const teamName of this.#config.approvalTeams) {
-      const filteredMember = prApprovedByUserList.filter(user => teamByName[teamName].includes(user))
+      const filteredMember = prApprovedByUserList.filter(user => (teamByName[teamName] || []).includes(user))
       result.prApprovedUserListByTeam[teamName] = filteredMember
       if (filteredMember.length === 0) {
         result.approvalMissingFromTeam.push(teamName)
@@ -114,7 +115,7 @@ export default class MigrationService {
     migrationMeta: MigrationMeta,
     params: NotifyParams
   ): Promise<NotifyResponse> {
-    const notifier = new NotifierService(
+    const notifier = this.#factory.getNotifier(
       dryRun,
       pullRequest,
       migrationMeta,
@@ -133,12 +134,17 @@ export default class MigrationService {
     core.info(`fn:runMigrationsForExecution PR#${pullRequest.number}, Dry Run: true, Source=${migrationMeta.source}`)
     const [prApprovedByUserList, secretMap] = await Promise.all([
       this.#getRequiredApprovalList(pullRequest.number),
-      this.secretClient.getSecrets(this.#config.dbSecretNameList)
+      this.#secretClient.getSecrets(this.#config.dbSecretNameList)
     ])
 
     const [migrationConfigList, jiraIssue] = await Promise.all([
       // Build configuration
-      buildMigrationConfigList(this.#config.baseDirectory, this.#config.databases, this.#config.devDBUrl, secretMap),
+      migration.buildMigrationConfigList(
+        this.#config.baseDirectory,
+        this.#config.databases,
+        this.#config.devDBUrl,
+        secretMap
+      ),
       // Fetch JIRA Issue
       this.#jiraClient?.findIssue(pullRequest.html_url) ?? Promise.resolve(undefined)
     ])
@@ -167,7 +173,7 @@ export default class MigrationService {
       return null
     }
 
-    const migrationRunListResponse = await runMigrationFromList(migrationConfigList, false)
+    const migrationRunListResponse = await migration.runMigrationFromList(migrationConfigList, false)
 
     const result: RunMigrationResult = {
       executionResponseList: migrationRunListResponse.executionResponseList,
@@ -227,23 +233,23 @@ export default class MigrationService {
     core.info(`fn:runMigrationForDryRun PR#${pr.number}, Dry Run: true, Source=${migrationMeta.source}`)
 
     if (migrationConfigList) {
-      await hydrateMigrationConfigList(
+      await migration.hydrateMigrationConfigList(
         migrationConfigList,
         this.#config.databases,
-        await this.secretClient.getSecrets(this.#config.dbSecretNameList)
+        await this.#secretClient.getSecrets(this.#config.dbSecretNameList)
       )
     } else {
-      migrationConfigList = await buildMigrationConfigList(
+      migrationConfigList = await migration.buildMigrationConfigList(
         this.#config.baseDirectory,
         this.#config.databases,
         this.#config.devDBUrl,
-        await this.secretClient.getSecrets(this.#config.dbSecretNameList)
+        await this.#secretClient.getSecrets(this.#config.dbSecretNameList)
       )
     }
 
     let lintResponseList: MigrationLintResponse | undefined
     if (migrationMeta.lintRequired) {
-      lintResponseList = await runLintFromList(
+      lintResponseList = await migration.runLintFromList(
         migrationConfigList,
         // codes like: ['PG103', 'BC102', 'DS103']
         this.#getLintErrorCodesThatCanBeSkipped(pr.labels),
@@ -251,7 +257,7 @@ export default class MigrationService {
       )
     }
 
-    const migrationRunListResponse = await runMigrationFromList(migrationConfigList, true)
+    const migrationRunListResponse = await migration.runMigrationFromList(migrationConfigList, true)
 
     if (
       !migrationRunListResponse.errMsg &&
@@ -330,7 +336,7 @@ export default class MigrationService {
       ensureJiraTicket: true,
       lintRequired: true
     }
-    const migrationConfigList = await buildMigrationConfigList(
+    const migrationConfigList = await migration.buildMigrationConfigList(
       this.#config.baseDirectory,
       this.#config.databases,
       this.#config.devDBUrl,
@@ -375,6 +381,7 @@ export default class MigrationService {
       commentId: event.payload.comment.id,
       commentBody: event.payload.comment.body
     }
+
     let result: RunMigrationResult | null = null
     if (commentBody === CMD_DRY_RUN) {
       result = await this.#runMigrationForDryRun(event.payload.issue, migrationMeta)
@@ -395,7 +402,8 @@ export default class MigrationService {
     core.info(`Invalid event: event=${eventName} action=${payload.action}`)
   }
 
-  async processEvent(event: gha.Context): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async processEvent(event: gha.Context): Promise<any> {
     const { payload, eventName } = event
 
     core.setOutput('event_type', `${eventName}:${payload.action}`)
@@ -413,17 +421,17 @@ export default class MigrationService {
       if (payload.action !== 'submitted') {
         return this.skipProcessingHandler(eventName, payload)
       }
-      await this.#processPullRequestReview(event)
+      return await this.#processPullRequestReview(event)
     } else if (eventName === 'issue_comment') {
       if (payload.action !== 'created') {
         return this.skipProcessingHandler(eventName, payload)
       }
-      await this.#processPullRequestComment(event)
+      return await this.#processPullRequestComment(event)
     } else if (eventName === 'pull_request') {
       if (payload.action !== 'opened' && payload.action !== 'reopened' && payload.action !== 'synchronize') {
         return this.skipProcessingHandler(eventName, payload)
       }
-      await this.#processPullRequest(event)
+      return await this.#processPullRequest(event)
     } else {
       return this.skipProcessingHandler(eventName, payload)
     }
