@@ -67,9 +67,6 @@ describe('JiraApi', () => {
         delete process.env.INPUT_JIRA_PASSWORD
         expect(() => factory.getJira({ ...config })).toThrow('Jira config missing password')
       })
-      it('should error when host is missing', () => {
-        expect(() => factory.getJira({ ...config, host: '' })).toThrow('Jira config missing host')
-      })
       it('should error when project is missing', () => {
         expect(() => factory.getJira({ ...config, project: '' })).toThrow('Jira config missing project')
       })

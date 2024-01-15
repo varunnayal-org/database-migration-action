@@ -10,7 +10,6 @@ import {
   DEFAULT_MIGRATION_BASE_DIR,
   DEFAULT_MIGRATION_CHILD_DIR,
   DEFAULT_PR_LABEL,
-  DEFAULT_SCHEMA,
   LINT_CODE_DEFAULT_PREFIXES,
   LINT_SKIP_ERROR_LABEL_PREFIX
 } from './constants'
@@ -35,7 +34,6 @@ function prepareRuntimeConfig(config: Config, configFileName: string): void {
     if (!dbConfig.directory) {
       dbConfig.directory = DEFAULT_MIGRATION_CHILD_DIR
     }
-    dbConfig.schema = dbConfig.schema || DEFAULT_SCHEMA
     return acc
   }, [])
 
@@ -83,7 +81,18 @@ const getJiraConfig = (jiraLabel: string): JIRAConfig | undefined => {
   }
 
   const jiraConfig = JSON.parse(jiraConfigString) as JIRAConfig
+  if (!jiraConfig.host) {
+    throw new Error('Jira config missing host')
+  }
+  if (!jiraConfig.project) {
+    throw new Error('Jira config missing project')
+  }
+
   jiraConfig.fields = jiraConfig.fields || {}
+  if (!jiraConfig.fields.pr) {
+    throw new Error('Jira config missing pr field')
+  }
+
   jiraConfig.issueType = jiraConfig.issueType || DEFAULT_JIRA_ISSUE_TYPE
   jiraConfig.label = jiraLabel
   jiraConfig.doneValue = jiraConfig.doneValue || DEFAULT_JIRA_COMPLETED_STATUS

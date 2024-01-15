@@ -11,10 +11,9 @@ import { LINT_CODE_DEFAULT_PREFIXES, TEMP_DIR_FOR_MIGRATION } from '../../src/co
 
 let atlasRun: jest.SpyInstance
 
-const getDB = (directory = '.', envName = 'test', schema = 'public'): DatabaseConfig => ({
+const getDB = (directory = '.', envName = 'test'): DatabaseConfig => ({
   directory,
-  envName,
-  schema
+  envName
 })
 
 const getVaultKeyStore = (...names: string[]): SecretMap =>

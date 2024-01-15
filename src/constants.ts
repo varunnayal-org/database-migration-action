@@ -3,7 +3,6 @@ export const CMD_DRY_RUN_JIRA = 'db migrate jira'
 export const CMD_APPLY = 'db migrate'
 
 export const DEFAULT_BASE_BRANCH = 'main'
-export const DEFAULT_SCHEMA = 'public'
 export const DEFAULT_MIGRATION_BASE_DIR = './migrations'
 export const DEFAULT_MIGRATION_CHILD_DIR = '.'
 export const DEFAULT_PR_LABEL = 'db-migration'

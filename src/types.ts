@@ -98,7 +98,6 @@ export interface Config {
 
 export interface DatabaseConfig {
   directory: string
-  schema: string
   baseline?: string
   envName: string
 }
@@ -191,11 +190,6 @@ export interface MigrationConfig {
    * An optional baseline.
    */
   baseline?: string
-
-  /**
-   * The schema.
-   */
-  schema: string
 
   /**
    * Indicates whether to perform a dry run.

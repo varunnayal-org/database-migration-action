@@ -87,7 +87,6 @@ async function buildMigrationConfigList(
       relativeDir: path.join(baseDirectory, dbConfig.directory),
       dir: '', // filled later on when hydrating
       dryRun: true,
-      schema: dbConfig.schema,
       baseline: dbConfig.baseline,
       devUrl
     }

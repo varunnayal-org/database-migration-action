@@ -8,17 +8,11 @@ import { TEMP_DIR_FOR_MIGRATION } from '../../src/constants'
 
 let utilExec: jest.SpyInstance
 
-const getExpectedMigrationConfigList = (
-  dir = '.',
-  dbUrlKey = 'test',
-  schema = 'public',
-  devUrl = 'test'
-): MigrationConfig => ({
+const getExpectedMigrationConfigList = (dir = '.', dbUrlKey = 'test', devUrl = 'test'): MigrationConfig => ({
   dir: path.join(TEMP_DIR_FOR_MIGRATION, dir),
   relativeDir: path.join(TEMP_DIR_FOR_MIGRATION, dir),
   originalDir: path.join(TEMP_DIR_FOR_MIGRATION, dir),
   databaseUrl: dbUrlKey,
-  schema,
   baseline: '',
   dryRun: true,
   devUrl
@@ -75,8 +69,6 @@ describe('runUsingAtlas', () => {
       `file://${migrationConfig.dir}`,
       '--format',
       '"{{ json .Applied }}"',
-      '--revisions-schema',
-      migrationConfig.schema,
       '--dry-run',
       '--baseline',
       baseline,
@@ -106,8 +98,6 @@ describe('runUsingAtlas', () => {
       `file://${migrationConfig.dir}`,
       '--format',
       '"{{ json .Applied }}"',
-      '--revisions-schema',
-      migrationConfig.schema,
       '--url',
       `${migrationConfig.databaseUrl}`
     ])
@@ -145,8 +135,6 @@ describe('runUsingAtlas', () => {
       `file://${migrationConfig.dir}`,
       '--format',
       '"{{ json .Applied }}"',
-      '--revisions-schema',
-      migrationConfig.schema,
       '--dry-run',
       '--url',
       `${migrationConfig.databaseUrl}`

@@ -24,7 +24,7 @@ inputs:
     description: 'Used to run lint operation against this DB'
   atlas_version:
     description: Atlas version
-    default: v0.16.0
+    default: v0.18.0
   debug:
     description: 'show debug logs (true|false)'
     default: 'false'

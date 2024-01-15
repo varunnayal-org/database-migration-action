@@ -57,7 +57,6 @@ export function getMigrationConfigList(
   dir = '.',
   databaseUrl = 'test',
   baseDir = 'migrations',
-  schema = 'public',
   devUrl = 'test'
 ): MigrationConfig[] {
   return [
@@ -66,7 +65,6 @@ export function getMigrationConfigList(
       originalDir: path.join(baseDir, dir),
       relativeDir: path.join(baseDir, dir),
       databaseUrl,
-      schema,
       baseline: undefined,
       dryRun: true,
       devUrl

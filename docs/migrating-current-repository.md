@@ -10,24 +10,24 @@
 1. Install [atlas](https://github.com/ariga/atlas)
 
     ```sh
-    curl -sSf https://atlasgo.sh | sh
+    curl -sSf https://atlasgo.sh | ATLAS_VERSION=v0.18.0 CI=true sh -s -- --community
     ```
 
 ## Setup Env Vars
 
 ```env
 # Should be an empty database
-LOCAL_DB="postgres://root:secret@localhost:5432/app-svc?sslmode=disable"
-LOCAL_DB1="postgres://root:secret@localhost:5432/app-svc1?sslmode=disable"
+LOCAL_DB="postgres://root:secret@localhost:5432/app-svc?sslmode=disable&search_path=public"
+LOCAL_DB1="postgres://root:secret@localhost:5432/app-svc1?sslmode=disable&search_path=public"
 
 MIGRATION_DIR=migrations
 
 # Your production/test/development database
 # **NOTE**: Credentials should be for migraiton user
-REMOTE_DB="postgres://{user}:{secret}@{host}:{port}/{db-name}"
+REMOTE_DB="postgres://{user}:{secret}@{host}:{port}/{db-name}?search_path={schema-name}"
 
 # Not to be confused with development database
-DEV_DB="postgres://root:secret@localhost:5432/dev_db?sslmode=disable"
+DEV_DB="postgres://root:secret@localhost:5432/dev_db?sslmode=disable?search_path={schema-name}"
 
 SCHEMA=public
 ```

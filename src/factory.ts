@@ -31,9 +31,6 @@ class Factory implements Builder {
 
   getJira(config?: JiraConfig): JiraClient | null {
     if (config) {
-      if (!config.host) {
-        throw new Error('Jira config missing host')
-      }
       const username = getInput('jira_username', 'na')
       if (username === 'na') {
         throw new Error('Jira config missing username')
