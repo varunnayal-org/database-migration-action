@@ -173,7 +173,33 @@ describe('NotifierService', () => {
       expect(mockGithubClient.addComment).toHaveBeenCalledTimes(1)
       expect(mockGithubClient.addComment).toHaveBeenCalledWith(
         1,
-        `Executed By: @user1\r\nReason=issue_comment.created\r\n${cfValidationGithubSummary}`
+        `Executed By: @user1\r\nReason: issue_comment.created\r\n${cfValidationGithubSummary}`
+      )
+    })
+
+    it('should call add comment with jira ticket', async () => {
+      mockGithubClient.addComment.mockResolvedValueOnce({ id: 12345, body: 'add comment' } as any)
+
+      const svc = new NotifierService(
+        true,
+        { number: 1 } as any,
+        { eventName: 'issue_comment', actionName: 'created', triggeredBy: { login: 'user1' } } as any,
+        {} as any,
+        mockGithubClient,
+        mockJiraClient
+      )
+      const response = await svc.buildGithubComment(mockTextBuilder.platform.github, {
+        closePR: false,
+        changedFileValidation,
+        jiraIssue: { key: 'KEY-1', id: '1', self: 'http://jira.com', fields: {} },
+        migrationRunListResponse: { executionResponseList: [], migrationAvailable: false, errMsg: '' }
+      })
+
+      expect(response).toEqual({ id: 12345, body: 'add comment' })
+      expect(mockGithubClient.addComment).toHaveBeenCalledTimes(1)
+      expect(mockGithubClient.addComment).toHaveBeenCalledWith(
+        1,
+        `Executed By: @user1\r\nReason: issue_comment.created\r\nJIRA Ticket: KEY-1\r\n${cfValidationGithubSummary}`
       )
     })
 
@@ -232,7 +258,7 @@ describe('NotifierService', () => {
       expect(mockGithubClient.addComment).toHaveBeenCalledTimes(1)
       expect(mockGithubClient.addComment).toHaveBeenCalledWith(
         1,
-        'Executed By: @user1\r\nReason=issue_comment.created\r\nlint comment text\r\n\r\nrun comment text'
+        'Executed By: @user1\r\nReason: issue_comment.created\r\nlint comment text\r\n\r\nrun comment text'
       )
     })
   })

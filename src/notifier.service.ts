@@ -70,11 +70,16 @@ Unmatched Files:
         `${this.#migrationMeta.commentBody}\r\n\r\n${githubSummaryText}`
       )
     } else {
+      let jiraTicket = ''
+      if (params.jiraIssue) {
+        jiraTicket = `\r\nJIRA Ticket: ${params.jiraIssue.key}`
+      }
+
       ghCommentPromise = this.#ghClient.addComment(
         this.#pr.number,
-        `Executed By: ${formatterMap.github.userRef(this.#migrationMeta.triggeredBy.login)}\r\nReason=${
+        `Executed By: ${formatterMap.github.userRef(this.#migrationMeta.triggeredBy.login)}\r\nReason: ${
           this.#migrationMeta.eventName
-        }.${this.#migrationMeta.actionName}\r\n${githubSummaryText}`
+        }.${this.#migrationMeta.actionName}${jiraTicket}\r\n${githubSummaryText}`
       )
     }
     return ghCommentPromise
@@ -145,33 +150,24 @@ Unmatched Files:
       this.#config.databases.map(db => getDirectoryForDb(this.#config.baseDirectory, db))
     )
 
-    const ghCommentPromise = this.buildGithubComment(builder.platform.github, params)
     const [jiraIssuePromise, jiraCommentPromise] = await this.buildJiraComment(builder.platform.jira, params)
+    const [jiraIssue, jiraComment] = await Promise.all([jiraIssuePromise, jiraCommentPromise])
 
-    const response = await Promise.allSettled([
-      ghCommentPromise,
-      jiraIssuePromise,
-      jiraCommentPromise,
-      core.summary.write()
-    ])
+    params.jiraIssue = jiraIssue
+
+    const ghCommentPromise = this.buildGithubComment(builder.platform.github, params)
+
+    const response = await Promise.allSettled([ghCommentPromise, core.summary.write()])
 
     if (response[0].status === 'rejected') {
       core.error('GHCommentError: ', response[0].reason)
       throw response[0].reason
     }
-    if (response[1].status === 'rejected') {
-      core.error('JiraIssueError: ', response[1].reason)
-      throw response[1].reason
-    }
-    if (response[2].status === 'rejected') {
-      core.error('JiraCommentError: ', response[2].reason)
-      throw response[2].reason
-    }
 
     return {
       githubComment: response[0].value,
-      jiraIssue: response[1].value,
-      jiraComment: response[2].value
+      jiraIssue: params.jiraIssue,
+      jiraComment
     }
   }
 }

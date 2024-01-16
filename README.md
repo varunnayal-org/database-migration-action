@@ -36,8 +36,6 @@ Flow diagram: [flow.puml](./docs/diagrams/flow.puml)
 
 - [ ] Schedule migrations
 - [ ] Single repository multi deployment
-- [x] Add PR approval comment for teams mentioned in configuration
-- [x] Closed PR?
 - [ ] Schema changes after approval
 
 ### Action Items
@@ -55,7 +53,9 @@ Flow diagram: [flow.puml](./docs/diagrams/flow.puml)
     ```
 
   - [x] Allow skipping of certain lint rules per PR basis: check [lint bypass checks](./docs/linting.md#bypass-checks)
+- [x] Users belonging to particular team defined in configuration can run migration
 - [ ] DBA SOP
+- [x] Close PR if schema migration contain other files
 - [x] Dry run on actual schema replica
   - [x] Can we use Postgres service
 - [ ] How to kill long running migrations: 
@@ -234,7 +234,7 @@ This setup is require only one time per organization that includes
     ```jsonc
     {
       // Name of the service. Required
-      "service_name": "my-app",
+      "serviceName": "my-app",
 
       // Base directory where migrations are present
       // Defaults: './migrations'
