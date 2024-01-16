@@ -33,11 +33,13 @@ export interface Config {
 
   /**
    * GitHub teams allowed to approve PR.
+   * If present, then member of these teams should approve the PR before migration can be run.
    */
   approvalTeams: string[]
 
   /**
    * GitHub teams that own the repository.
+   * The member of this team can run migration
    */
   ownerTeams: string[]
 
