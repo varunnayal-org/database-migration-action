@@ -70,7 +70,13 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
       '--dir',
       getDirArg(migrationConfig.dir),
       '--format',
-      '"{{ json .Applied }}"'
+      '"{{ json .Applied }}"',
+      '--exec-order',
+      'linear',
+      '--tx-mode',
+      'file',
+      '--lock-timeout',
+      '10s'
     ]
 
     if (migrationConfig.dryRun) {

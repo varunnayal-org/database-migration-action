@@ -142,7 +142,10 @@ To over come, update the file with
 ```sql
 -- atlas:txmode none
 
+-- creating this index
 CREATE INDEX CONCURRENTLY "idx_uniq_email" ON "public"."user" ("email");
+
+-- deleting this index
 DELETE INDEX CONCURRENTLY idx_uniq_email;
 ```
 

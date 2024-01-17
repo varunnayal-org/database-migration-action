@@ -234,6 +234,11 @@ export interface MatchTeamWithPRApproverResult {
  */
 export interface RunMigrationResult {
   /**
+   * An optional array of responses from a migration lint operation.
+   */
+  lintResponseList?: MigrationLintResponse
+
+  /**
    * An array of responses from executing the migration.
    */
   executionResponseList: MigrationExecutionResponse[]

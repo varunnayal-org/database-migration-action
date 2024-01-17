@@ -72,6 +72,9 @@
     "collectCoverage": true,
     "collectCoverageFrom": [
       "./src/**"
+    ],
+    "setupFilesAfterEnv": [
+      "./src/jestSetup.ts"
     ]
   },
   "dependencies": {

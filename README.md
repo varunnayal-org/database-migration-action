@@ -20,7 +20,6 @@ Flow diagram: [flow.puml](./docs/diagrams/flow.puml)
     - [Repository Setup](#repository-setup)
     - [Bare Minimum Setup](#bare-minimum-setup)
 
-
 ## Features
 
 1. Ensure auditable database migrations
@@ -58,7 +57,7 @@ Flow diagram: [flow.puml](./docs/diagrams/flow.puml)
 - [x] Close PR if schema migration contain other files
 - [x] Dry run on actual schema replica
   - [x] Can we use Postgres service
-- [ ] How to kill long running migrations: 
+- [ ] How to kill long running migrations:
   > It's going to be a manual process where DBA can refer/use [pg_terminate_backend](https://stackoverflow.com/a/35319598) command.
 - [ ] How to capture database drifts
   > We can use `atlas schema diff` command to find the different b/w what's there in migration directory to production.
@@ -175,8 +174,8 @@ This setup is require only one time per organization that includes
     >
     > **NOTE**: *DBA* should add the connection string and hand over the variable name to service team
 
-    1. **search_path**: It defaults to `public`, but should always be mentioned. Otherwise, you might get errors because of other schemas in the system 
-2. Add following workflow file `db-migration.yml`
+    1. **search_path**: It defaults to `public`, but should always be mentioned. Otherwise, you might get errors because of other schemas in the system
+1. Add following workflow file `db-migration.yml`
 
     ```yml
     name: Schema Migration GitOps
@@ -229,7 +228,7 @@ This setup is require only one time per organization that includes
               dev_db_url: "postgres://postgres:postgres@postgres:5432/test?sslmode=disable"
     ```
 
-3. Add migration config file `db.migration.json`
+1. Add migration config file `db.migration.json`
 
     ```jsonc
     {

@@ -16,7 +16,13 @@ import {
 } from './types'
 import { VaultClient } from './client/vault/types'
 import * as validators from './validators'
-import { CMD_DRY_RUN, CMD_DRY_RUN_JIRA, CMD_APPLY, NO_MIGRATION_AVAILABLE } from './constants'
+import {
+  CMD_DRY_RUN,
+  CMD_DRY_RUN_JIRA,
+  CMD_APPLY,
+  NO_MIGRATION_AVAILABLE,
+  DEFAULT_PR_JIRA_TICKET_LABEL
+} from './constants'
 
 export default class MigrationService {
   #ghClient: gha.GHClient
@@ -43,12 +49,14 @@ export default class MigrationService {
   }
 
   async #ensureLabels(pullRequest: gha.PullRequest, jiraIssue?: JiraIssue): Promise<void> {
-    let labelsToAdd = [this.#config.prLabel]
-    if (jiraIssue) {
-      labelsToAdd.push('jira-ticket-created')
-    }
+    const labelsToAdd = []
 
-    labelsToAdd = labelsToAdd.filter(label => !this.#hasLabel(pullRequest.labels, label))
+    if (this.#hasLabel(pullRequest.labels, this.#config.prLabel) === false) {
+      labelsToAdd.push(this.#config.prLabel)
+    }
+    if (jiraIssue && this.#hasLabel(pullRequest.labels, DEFAULT_PR_JIRA_TICKET_LABEL) === false) {
+      labelsToAdd.push(DEFAULT_PR_JIRA_TICKET_LABEL)
+    }
 
     if (labelsToAdd.length > 0) {
       await this.#ghClient.addLabel(pullRequest.number, labelsToAdd)
@@ -154,7 +162,7 @@ export default class MigrationService {
     if (!failureMsg) {
       // Fetch approved grouped by allowed teams
       const teams = await this.#matchTeamWithPRApprovers(prApprovedByUserList)
-      core.error(`matchTeamWithPRApprovers: ${JSON.stringify(teams)}`)
+      core.debug(`matchTeamWithPRApprovers: ${JSON.stringify(teams)}`)
       failureMsg = validators.validateMigrationExecutionForApproval(
         pullRequest,
         migrationMeta,
@@ -173,9 +181,31 @@ export default class MigrationService {
       return null
     }
 
+    const lintResponseList = await migration.runLintFromList(
+      migrationConfigList,
+      this.#getLintErrorCodesThatCanBeSkipped(pullRequest.labels),
+      this.#config.lintCodePrefixes
+    )
+
+    if (lintResponseList.errMsg && lintResponseList.canSkipAllErrors === false) {
+      core.setFailed(lintResponseList.errMsg)
+      await buildCommentInfoFn({
+        lintResponseList,
+        jiraIssue,
+        migrationRunListResponse: { migrationAvailable: false, executionResponseList: [] }
+      })
+      return {
+        ignore: true,
+        executionResponseList: [],
+        migrationAvailable: false,
+        lintResponseList
+      }
+    }
+
     const migrationRunListResponse = await migration.runMigrationFromList(migrationConfigList, false)
 
     const result: RunMigrationResult = {
+      lintResponseList,
       executionResponseList: migrationRunListResponse.executionResponseList,
       migrationAvailable: migrationRunListResponse.migrationAvailable,
       ignore: false
@@ -367,6 +397,7 @@ export default class MigrationService {
     if (result.migrationAvailable) {
       await this.#ensureLabels(pr, result.jiraIssue)
     }
+
     return result
   }
 
