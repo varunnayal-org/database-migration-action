@@ -1,6 +1,7 @@
 import JiraApi, { IssueObject } from 'jira-client'
 import * as core from '@actions/core'
 import { CustomFields, Config, JiraIssue, JiraComment, CreateTicketParams, JiraClient } from '../../src/types.jira'
+import { executeWithRetry } from '../util'
 
 class Client implements JiraClient {
   #project: string
@@ -24,7 +25,7 @@ class Client implements JiraClient {
   }
 
   async addComment(issueId: string, message: string): Promise<JiraComment> {
-    const comment = await this.#api.addComment(issueId, message)
+    const comment = await executeWithRetry(async () => this.#api.addComment(issueId, message), 'AddComment')
     const retObj: JiraComment = {
       id: comment.id,
       self: comment.self,
@@ -37,7 +38,7 @@ class Client implements JiraClient {
     const jql = `project="${this.#project}" AND ${searchText}`
     core.debug(`Jira Search Text: [${jql}]`)
 
-    const response = await this.#api.searchJira(jql, { maxResults: 2 })
+    const response = await executeWithRetry(async () => this.#api.searchJira(jql, { maxResults: 2 }), 'SearchIssue')
     if (response.issues.length === 0) {
       return null
     } else if (response.issues.length > 1) {
@@ -77,7 +78,7 @@ class Client implements JiraClient {
       }
     }
 
-    const issue = await this.#api.addNewIssue(createJiraTicketParams)
+    const issue = await executeWithRetry(async () => this.#api.addNewIssue(createJiraTicketParams), 'AddNewIssue')
     const retObj: JiraIssue = {
       id: issue.id,
       key: issue.key,

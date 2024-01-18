@@ -410,6 +410,7 @@ export default class MigrationService {
       source: 'comment',
       triggeredBy: event.payload.sender,
       commentId: event.payload.comment.id,
+      lintRequired: true,
       commentBody: event.payload.comment.body
     }
 

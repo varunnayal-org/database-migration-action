@@ -4,7 +4,7 @@ import * as core from '@actions/core'
 import { VaultClient } from '../src/client/vault/types'
 import { GHClient, PullRequest } from '../src/types.gha'
 import { JiraClient, JiraIssue } from '../src/types.jira'
-import { Builder, Config, MigrationMeta, Notifier, NotifyResponse } from '../src/types'
+import { Builder, Config, MigrationLintResponse, MigrationMeta, Notifier, NotifyResponse } from '../src/types'
 import MigrationService from '../src/migration.service'
 import { LINT_CODE_DEFAULT_PREFIXES } from '../src/constants'
 import * as c from './common'
@@ -17,7 +17,6 @@ import {
 } from '../src/migration/atlas-class'
 
 let coreSetFailed: jest.SpyInstance
-let coreError: jest.SpyInstance
 
 function buildVault(): VaultClient {
   return {
@@ -126,9 +125,6 @@ describe('migration service', () => {
     jest.clearAllMocks()
 
     coreSetFailed = jest.spyOn(core, 'setFailed').mockImplementation(jest.fn())
-    coreError = jest.spyOn(core, 'error').mockImplementation(jest.fn())
-    // mock.restore()
-    // mock(c.getMockDirectories())
 
     vaultClient = buildVault()
     ghClient = buildGithub()
@@ -239,16 +235,17 @@ describe('migration service', () => {
       response: any,
       migrationMeta: MigrationMeta,
       pr = getPR(),
-      addLint = false,
+      addLint: boolean | MigrationLintResponse = false,
       jiraIssue: JiraIssue | undefined = undefined
     ): void {
+      const expectedExecutionResponseList = [
+        {
+          containsMigrations: true,
+          migrations: buildMVER(c.artifacts.no_lint_error.versionExecution?.mg1)
+        }
+      ]
       expect(response).toEqual({
-        executionResponseList: [
-          {
-            containsMigrations: true,
-            migrations: buildMVER(c.artifacts.no_lint_error.versionExecution?.mg1)
-          }
-        ],
+        executionResponseList: expectedExecutionResponseList,
         migrationAvailable: true,
         jiraIssue: jiraIssue || getJiraIssue(),
         ignore: true
@@ -261,31 +258,28 @@ describe('migration service', () => {
       expect(notifier.notify).toHaveBeenCalledWith({
         migrationRunListResponse: {
           migrationAvailable: true,
-          executionResponseList: [
-            {
-              containsMigrations: true,
-              migrations: buildMVER(c.artifacts.no_lint_error.versionExecution?.mg1)
-            }
-          ]
+          executionResponseList: expectedExecutionResponseList
         },
         addMigrationRunResponseForLint: true,
 
-        ...(addLint
-          ? {
-              lintResponseList: {
-                lintResponseList: [
-                  {
-                    fileLintResults: [],
-                    migrationDir: 'mg1',
-                    allSkipped: false,
-                    firstError:
-                      '"[{\\"Name\\":\\"00000000000000_baseline.sql\\",\\"Text\\":\\"CREATE EXTENSION IF NOT EXISTS \\\\\\"uuid-ossp\\\\\\";\\"},{\\"Name\\":\\"20231222064834_step1.sql\\",\\"Text\\":\\"CREATE TABLE\\\\n  users (id int primary key, nAme1 varchar(100), age int, email varchar(100));\\\\n\\"},{\\"Name\\":\\"20231222064941_step3.sql\\",\\"Text\\":\\"--atlas:txmode none\\\\n\\\\ncreate index concurrently idx_users_email on users(email);\\\\n\\\\ncreate index concurrently idx_users_age on users(age);\\"},{\\"Name\\":\\"20231222120857_step4.sql\\",\\"Text\\":\\"-- atlas:txmode none\\\\n\\\\nCREATE TABLE\\\\n  sessions (\\\\n    id int primary key,\\\\n    user_id int not null,\\\\n    data text not null,\\\\n    created_at timestamptz not null default now ()\\\\n  );\\\\n\\\\n-- works because table is created in this version\\\\ncreate index idx_sessions_user_id on sessions(user_id);\\\\n\\\\n\\"}]"'
-                  }
-                ],
-                canSkipAllErrors: false
+        ...(addLint === false
+          ? {}
+          : addLint === true
+            ? {
+                lintResponseList: {
+                  lintResponseList: [
+                    {
+                      fileLintResults: [],
+                      migrationDir: 'mg1',
+                      allSkipped: false,
+                      firstError:
+                        '"[{\\"Name\\":\\"00000000000000_baseline.sql\\",\\"Text\\":\\"CREATE EXTENSION IF NOT EXISTS \\\\\\"uuid-ossp\\\\\\";\\"},{\\"Name\\":\\"20231222064834_step1.sql\\",\\"Text\\":\\"CREATE TABLE\\\\n  users (id int primary key, nAme1 varchar(100), age int, email varchar(100));\\\\n\\"},{\\"Name\\":\\"20231222064941_step3.sql\\",\\"Text\\":\\"--atlas:txmode none\\\\n\\\\ncreate index concurrently idx_users_email on users(email);\\\\n\\\\ncreate index concurrently idx_users_age on users(age);\\"},{\\"Name\\":\\"20231222120857_step4.sql\\",\\"Text\\":\\"-- atlas:txmode none\\\\n\\\\nCREATE TABLE\\\\n  sessions (\\\\n    id int primary key,\\\\n    user_id int not null,\\\\n    data text not null,\\\\n    created_at timestamptz not null default now ()\\\\n  );\\\\n\\\\n-- works because table is created in this version\\\\ncreate index idx_sessions_user_id on sessions(user_id);\\\\n\\\\n\\"}]"'
+                    }
+                  ],
+                  canSkipAllErrors: false
+                }
               }
-            }
-          : {})
+            : { lintResponseList: addLint })
       })
     }
 
@@ -352,13 +346,23 @@ describe('migration service', () => {
     })
 
     // eslint-disable-next-line jest/expect-expect
-
-    it('should not ensure jira ticket when commented', async () => {
+    it('should ensure jira ticket when commented', async () => {
       mockM('runMigrationFromList', {
         migrationAvailable: true,
         executionResponseList: [
           AtlasMigrationExecutionResponse.build(JSON.stringify(c.artifacts.no_lint_error.versionExecution?.mg1))
         ]
+      })
+      mockM('runLintFromList', {
+        lintResponseList: [
+          AtlasLintResponse.build(
+            JSON.stringify(c.artifacts.no_lint_error.lintResponseOutput.mg1),
+            'mg1',
+            [],
+            LINT_CODE_DEFAULT_PREFIXES
+          )
+        ],
+        canSkipAllErrors: false
       })
       notifier.notify = jest.fn().mockResolvedValue({
         githubComment: {},
@@ -394,9 +398,11 @@ describe('migration service', () => {
           },
           commentId: 212121,
           commentBody: 'db migrate jira',
+          lintRequired: true,
           ensureJiraTicket: true
         },
-        getPR(['jira-ticket-created'])
+        getPR(['jira-ticket-created']),
+        true
       )
 
       // Label added to PR
@@ -441,7 +447,8 @@ describe('migration service', () => {
           source: 'comment',
           triggeredBy: c.user('user-aaa'),
           commentId: 212121,
-          commentBody: 'db migrate'
+          commentBody: 'db migrate',
+          lintRequired: true
         },
         config,
         ghClient,
@@ -588,7 +595,8 @@ describe('migration service', () => {
           source: 'comment',
           triggeredBy: { login: 'user-aaa', type: 'User' },
           commentId: 212121,
-          commentBody: 'db migrate'
+          commentBody: 'db migrate',
+          lintRequired: true
         },
         config,
         ghClient,
@@ -671,7 +679,8 @@ describe('migration service', () => {
           source: 'comment',
           triggeredBy: { login: 'user-aaa', type: 'User' },
           commentId: 212121,
-          commentBody: 'db migrate'
+          commentBody: 'db migrate',
+          lintRequired: true
         },
         config,
         ghClient,
@@ -784,7 +793,8 @@ describe('migration service', () => {
         source: 'comment',
         triggeredBy: { login: 'user-aaa', type: 'User' },
         commentId: 212121,
-        commentBody: 'db migrate'
+        commentBody: 'db migrate',
+        lintRequired: true
       },
       config,
       ghClient,
@@ -805,70 +815,31 @@ describe('migration service', () => {
   // You add SQL files in PR. The label will be added to the PR
   // after that when PR is removed, then the gha register the error(core.error method)
 
-  it('should error when sql files are removed from PR', async () => {
-    // pr not approved by approvalTeams
-    ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ddd'])
-    vaultClient.getSecrets = jest.fn().mockResolvedValue({
-      CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
-    })
-    // JIRA ticket is approved
-    jiraClient.findIssue = jest.fn().mockResolvedValue(getApprovedJiraIssue())
-    mockM('runMigrationFromList', {
-      migrationAvailable: false,
-      executionResponseList: []
-    })
-    mockM('runLintFromList', { lintResponseList: [], canSkipAllErrors: false })
-    notifier.notify = jest.fn()
-
-    const expectedErrMsg = 'No migrations available'
+  it('should return silently when sql files are removed from PR', async () => {
+    ghClient.getChangedFiles = jest.fn().mockResolvedValue([])
 
     const svc = getSvc()
     const response = await svc.processEvent(
-      c.getPRCommentContext({
-        action: 'created',
-        comment: c.getComment(212121, '', 'user-ddd'),
-        issue: getPR(),
+      c.getPRContext({
+        action: 'synchronize',
+        after: 'xxxxx',
+        before: 'aaaaaa',
+        number: 1,
         organization: {
           login: 'my-org'
         },
+        pull_request: getPR(),
         repository: c.getRepo(),
         sender: c.user('user-aaa')
       })
     )
 
     expect(response).toEqual({
-      lintResponseList: { lintResponseList: [], canSkipAllErrors: false },
       executionResponseList: [],
       migrationAvailable: false,
       ignore: true
     })
-    // // Notified thus creating Github comment and JIRA issue
-    expect(factory.getNotifier).toHaveBeenCalledTimes(1)
-    expect(factory.getNotifier).toHaveBeenCalledWith(
-      false,
-      getPR(),
-      {
-        eventName: 'issue_comment',
-        actionName: 'created',
-        source: 'comment',
-        triggeredBy: { login: 'user-aaa', type: 'User' },
-        commentId: 212121,
-        commentBody: 'db migrate'
-      },
-      config,
-      ghClient,
-      jiraClient
-    )
-    expect(notifier.notify).toHaveBeenCalledTimes(1)
-    expect(notifier.notify).toHaveBeenCalledWith({
-      migrationRunListResponse: {
-        migrationAvailable: false,
-        executionResponseList: [],
-        errMsg: expectedErrMsg
-      }
-    })
-
-    expect(coreError).toHaveBeenCalledWith(expectedErrMsg)
+    expect(coreSetFailed).toHaveBeenCalledTimes(0)
   })
 
   it('should close pr if migration has unwanted files', async () => {

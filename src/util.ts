@@ -106,7 +106,7 @@ async function exec(command: string, args: string[]): Promise<string> {
  * @param pathPrefixList
  * @param changedFiles
  */
-export function globFromList(
+function globFromList(
   migrationDirPathList: string[],
   changedFiles: string[]
 ): { matched: string[][]; unmatched: string[] } {
@@ -138,4 +138,33 @@ export function globFromList(
   return { matched, unmatched }
 }
 
-export { createTempDir, removeDir, cleanDir, getEnv, getInput, exec, readableDate }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function executeWithRetry<T = any>(
+  fn: () => Promise<T>,
+  errPrefix: string,
+  maxRetryCount = 3,
+  minWaitMS = 500,
+  maxWaitMS = 2000
+): Promise<T> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let err: any
+  for (let i = 1; i <= maxRetryCount; ++i) {
+    try {
+      return fn()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (ex: any) {
+      if (!err) {
+        err = ex
+      }
+      if (i < maxRetryCount) {
+        const randomWaitMS = Math.floor(Math.random() * (maxWaitMS - minWaitMS + 1) + minWaitMS)
+        setTimeout(() => {}, randomWaitMS)
+        continue
+      }
+    }
+  }
+  core.error(`${errPrefix} Error: ${err.message}`)
+  throw err
+}
+
+export { createTempDir, removeDir, cleanDir, getEnv, getInput, exec, readableDate, globFromList, executeWithRetry }

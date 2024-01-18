@@ -197,4 +197,50 @@ describe('util', () => {
       })
     })
   })
+
+  describe('executeWithRetry', () => {
+    let mock: jest.Mock
+    let callNum: number
+    function setupMock(numOfErrors = 0): void {
+      callNum = 1
+      mock = jest.fn().mockImplementation(() => {
+        if (numOfErrors >= 1 && callNum <= numOfErrors) {
+          throw new Error(`Err: ${callNum++}`)
+        }
+        return callNum++
+      })
+    }
+    beforeEach(() => {
+      jest.clearAllMocks()
+      setupMock(0) // do not throw error
+    })
+    it('should execute successfully', () => {
+      util.executeWithRetry(mock, 'test')
+      expect(mock).toHaveBeenCalledTimes(1)
+    })
+
+    it('should execute successfully after retry', () => {
+      const maxRetry = 4
+      const maxErrThrow = 2
+      setupMock(maxErrThrow)
+      util.executeWithRetry(() => mock(callNum), 'test', maxRetry, 2, 4)
+
+      expect(mock).toHaveBeenCalledTimes(maxErrThrow + 1) // extra for successful call
+      expect(mock).toHaveBeenNthCalledWith(1, 1)
+      expect(mock).toHaveBeenNthCalledWith(2, 2)
+      expect(mock).toHaveBeenNthCalledWith(3, 3)
+    })
+
+    it('should error after retry', async () => {
+      const maxRetry = 3
+      setupMock(3)
+      await expect(async () => util.executeWithRetry(() => mock(callNum), 'test', maxRetry, 2, 4)).rejects.toThrow(
+        'Err: 1'
+      )
+      expect(mock).toHaveBeenCalledTimes(maxRetry)
+      expect(mock).toHaveBeenNthCalledWith(1, 1)
+      expect(mock).toHaveBeenNthCalledWith(2, 2)
+      expect(mock).toHaveBeenNthCalledWith(3, 3)
+    })
+  })
 })
