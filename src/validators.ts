@@ -3,7 +3,7 @@ import * as core from '@actions/core'
 
 import { ChangedFileValidationError, MatchTeamWithPRApproverResult, MigrationConfig, MigrationMeta } from './types'
 import * as util from './util'
-import { CMD_DRY_RUN, NO_MIGRATION_AVAILABLE, UNWANTED_FILES_FOUND } from './constants'
+import { ALLOWED_CHANGED_FILE_EXTENSION, CMD_DRY_RUN, NO_MIGRATION_AVAILABLE, UNWANTED_FILES_FOUND } from './constants'
 import { Config, JiraIssue } from './types.jira'
 import * as gha from './types.gha'
 
@@ -101,6 +101,7 @@ export function validateChangedFiles(
     changedFiles
   )
 
+  // check matched files
   for (let idx = 0; idx < matched.length; idx++) {
     const matchedFiles = matched[idx].filter(file => util.hasExtension(file, '.sql'))
 
@@ -113,13 +114,14 @@ export function validateChangedFiles(
     return { errMsg: NO_MIGRATION_AVAILABLE, unmatched: [], migrationAvailable: hasMigrationVersionFile }
   }
 
+  // check unmatched files
   const unmatchedFilesToConsider = unmatched.filter(file => {
     // "./db.migration.json" to "db.migration.json"
     if (file === path.relative('.', configFileName) || file === 'Makefile') {
       return false
     }
 
-    if (util.hasExtensions(file, ['.yml', '.yaml', '.sql'])) {
+    if (util.hasExtensions(file, ALLOWED_CHANGED_FILE_EXTENSION)) {
       return false
     }
 

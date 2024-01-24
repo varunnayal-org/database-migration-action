@@ -322,7 +322,8 @@ describe('github client', () => {
       expect(mockListFiles).toHaveBeenCalledWith({
         owner: 'orgOwner',
         repo: 'repoName',
-        pull_number: prNumber
+        pull_number: prNumber,
+        per_page: 3000
       })
     })
 

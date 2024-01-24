@@ -245,7 +245,8 @@ class Client implements GHClient {
       await this.#client.rest.pulls.listFiles({
         owner: this.#repoOwner,
         repo: this.#repoName,
-        pull_number: prNumber
+        pull_number: prNumber,
+        per_page: 3000
       })
     )
 

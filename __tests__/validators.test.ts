@@ -365,6 +365,10 @@ describe('validateChangedFiles', () => {
       'migrations/a.yaml',
       'migrations/db1/2.sql',
       'migrations/db2/1.sql',
+      'atlas.hcl',
+      'migrations/atlas.sum',
+      'file.json',
+      'migrations/InitDbChanges.xml',
       'src/config.yaml'
     ]
     const response = validateChangedFiles(migrationConfigList, changedFiles, dbMigrationFile)
@@ -454,7 +458,7 @@ describe('validateChangedFiles', () => {
     expect(migrationConfigList[1].lintLatestFiles).toBe(4)
     expect(response).toEqual({
       errMsg: 'Unwanted files found',
-      unmatched: ['migrations/a.txt', 'src/config.json'],
+      unmatched: ['migrations/a.txt'],
       migrationAvailable: true
     })
   })
