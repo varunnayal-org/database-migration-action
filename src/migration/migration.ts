@@ -5,6 +5,8 @@ import * as core from '@actions/core'
 import * as util from '../util'
 import {
   DatabaseConfig,
+  DriftExecutionResponse,
+  DriftRunListResponse,
   LintExecutionResponse,
   MigrationConfig,
   MigrationExecutionResponse,
@@ -173,11 +175,29 @@ async function runMigrationFromList(
   return response
 }
 
+async function runSchemaDriftFromList(migrationConfigList: MigrationConfig[]): Promise<DriftRunListResponse> {
+  const drifts: DriftExecutionResponse[] = []
+  let errMsg: string | undefined
+  for (const migrationConfig of migrationConfigList) {
+    const drift = await atlas.drift(migrationConfig)
+    if (!errMsg && drift.getError()) {
+      errMsg = drift.getError()
+    }
+    drifts.push(drift)
+  }
+  core.info(`Schema Drift Response: ${JSON.stringify(drifts, null, 2)}`)
+  return {
+    drifts,
+    errMsg
+  }
+}
+
 export {
   getDirectoryForDb,
   setDryRun,
   hydrateMigrationConfigList,
   buildMigrationConfigList,
   runMigrationFromList,
-  runLintFromList
+  runLintFromList,
+  runSchemaDriftFromList
 }

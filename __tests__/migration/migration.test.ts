@@ -3,9 +3,9 @@ import fs from 'fs/promises'
 
 import * as atlas from '../../src/migration/atlas'
 import * as migration from '../../src/migration/migration'
-import { DatabaseConfig, MigrationConfig, MigrationRunListResponse } from '../../src/types'
+import { DatabaseConfig, DriftExecutionResponse, MigrationConfig, MigrationRunListResponse } from '../../src/types'
 import { SecretMap } from '../../src/client/vault/types'
-import { AtlasLintResponse, AtlasMigrationExecutionResponse } from '../../src/migration/atlas-class'
+import { AtlasLintResponse, AtlasMigrationExecutionResponse, DriftResponse } from '../../src/migration/atlas-class'
 import * as c from '../common'
 import { LINT_CODE_DEFAULT_PREFIXES, TEMP_DIR_FOR_MIGRATION } from '../../src/constants'
 
@@ -17,10 +17,12 @@ const getDB = (directory = '.', envName = 'test'): DatabaseConfig => ({
 })
 
 const getVaultKeyStore = (...names: string[]): SecretMap =>
-  names.length === 0 ? { test: 'test' } : names.reduce((acc, name) => ({ ...acc, [name]: name }), {})
+  names.length === 0
+    ? { test: 'postgres://root:secret@db.host:5432/appdb?search_path=public' }
+    : names.reduce((acc, name) => ({ ...acc, [name]: name }), {})
 
 describe('buildMigrationConfigList', () => {
-  const devDBUrl = 'test'
+  const devDBUrl = 'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled&search_path=public'
   beforeEach(() => {
     jest.clearAllMocks()
     mock.restore()
@@ -555,5 +557,80 @@ describe('runLintFromList', () => {
     expect(response).toEqual(expectedResponse)
     expect(atlasLintFn).toHaveBeenCalledTimes(1)
     expect(atlasLintFn).toHaveBeenCalledWith(migrationConfig[0], ['PG101', 'PG103'], LINT_CODE_DEFAULT_PREFIXES)
+  })
+})
+
+describe('runSchemaDriftFromList', () => {
+  let atlasDrift: jest.SpyInstance
+  beforeEach(() => {
+    jest.clearAllMocks()
+    atlasDrift = jest.spyOn(atlas, 'drift').mockImplementation()
+  })
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const atlasDriftMockFn = (driftResponse: DriftExecutionResponse[]): any => {
+    let atlasDriftFnCallCount = 0
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    return atlasDrift.mockImplementation(async (migrationConfig: MigrationConfig) => {
+      ++atlasDriftFnCallCount
+      return driftResponse[atlasDriftFnCallCount - 1]
+    })
+  }
+
+  it('should return no error', async () => {
+    const migrationConfig = [
+      ...c.getMigrationConfigList('db1', '', 'multi_db_dir'),
+      ...c.getMigrationConfigList(
+        'db2',
+        'postgres://root:secret@db.host:5432/appdb2?search_path=public',
+        'multi_db_dir'
+      )
+    ]
+
+    const atlasDriftFn = atlasDriftMockFn([DriftResponse.build(''), DriftResponse.build('')])
+    const response = await migration.runSchemaDriftFromList(migrationConfig)
+
+    expect(response).toEqual({
+      drifts: [{ statements: [] }, { statements: [] }]
+    })
+    expect(atlasDriftFn).toHaveBeenCalledTimes(2)
+    expect(atlasDriftFn).toHaveBeenNthCalledWith(1, migrationConfig[0])
+    expect(atlasDriftFn).toHaveBeenNthCalledWith(2, migrationConfig[1])
+  })
+
+  it('should return error', async () => {
+    const migrationConfig = [
+      ...c.getMigrationConfigList('db1', '', 'multi_db_dir'),
+      ...c.getMigrationConfigList(
+        'db2',
+        'postgres://root:secret@db.host:5432/appdb2?search_path=public',
+        'multi_db_dir'
+      ),
+      ...c.getMigrationConfigList(
+        'db2',
+        'postgres://root:secret@db.host:5432/appdb3?search_path=public',
+        'multi_db_dir'
+      )
+    ]
+
+    const atlasDriftFn = atlasDriftMockFn([
+      DriftResponse.build(''),
+      DriftResponse.fromError('some error'),
+      DriftResponse.fromError('some other error')
+    ])
+    const response = await migration.runSchemaDriftFromList(migrationConfig)
+
+    expect(response).toEqual({
+      drifts: [
+        { statements: [] },
+        { statements: [], error: 'some error' },
+        { statements: [], error: 'some other error' }
+      ],
+      errMsg: 'some error'
+    })
+    expect(atlasDriftFn).toHaveBeenCalledTimes(3)
+    expect(atlasDriftFn).toHaveBeenNthCalledWith(1, migrationConfig[0])
+    expect(atlasDriftFn).toHaveBeenNthCalledWith(2, migrationConfig[1])
+    expect(atlasDriftFn).toHaveBeenNthCalledWith(3, migrationConfig[2])
   })
 })

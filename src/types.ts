@@ -165,6 +165,21 @@ export interface MigrationRunListResponse {
 }
 
 /**
+ * Represents the response from drift operations.
+ */
+export interface DriftRunListResponse {
+  /**
+   * An array of drift execution responses.
+   */
+  drifts: DriftExecutionResponse[]
+
+  /**
+   * An optional error message.
+   */
+  errMsg?: string
+}
+
+/**
  * Represents the configuration for a migration.
  */
 export interface MigrationConfig {

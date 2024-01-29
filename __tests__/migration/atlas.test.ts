@@ -15,7 +15,7 @@ const getExpectedMigrationConfigList = (dir = '.', dbUrlKey = '', devUrl = ''): 
   databaseUrl: dbUrlKey === '' ? 'postgres://root:secret@db.host:5432/appdb?search_path=public' : dbUrlKey,
   baseline: '',
   dryRun: true,
-  devUrl: devUrl === '' ? 'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled&search_path=public' : devUrl,
+  devUrl: devUrl === '' ? 'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled&search_path=public' : devUrl
 })
 function getBaseExecutionList(): VersionExecution[] {
   return [
@@ -41,22 +41,21 @@ function getBaseExecutionList(): VersionExecution[] {
   ]
 }
 
-
 describe('atlas', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     utilExec = jest.spyOn(util, 'exec').mockImplementation()
   })
-  
+
   describe('run', () => {
     it('should return response', async () => {
       const baseline = '00000000000000_baseline.sql'
       const migrationConfig = getExpectedMigrationConfigList()
       migrationConfig.baseline = baseline
       const utilExecFn = utilExec.mockImplementationOnce(() => JSON.stringify(getBaseExecutionList()))
-  
+
       await atlas.run(migrationConfig)
-  
+
       expect(utilExecFn).toHaveBeenCalledTimes(2)
       expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
         'migrate',
@@ -84,14 +83,14 @@ describe('atlas', () => {
         `${migrationConfig.databaseUrl}`
       ])
     })
-  
+
     it('should return response for execution dryRun=false', async () => {
       const migrationConfig = getExpectedMigrationConfigList()
       migrationConfig.dryRun = false
       const utilExecFn = utilExec.mockImplementationOnce(() => JSON.stringify(getBaseExecutionList()))
-  
+
       await atlas.run(migrationConfig)
-  
+
       expect(utilExecFn).toHaveBeenCalledTimes(2)
       expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
         'migrate',
@@ -116,13 +115,13 @@ describe('atlas', () => {
         `${migrationConfig.databaseUrl}`
       ])
     })
-  
+
     it('should return response when errored out with json list', async () => {
       const migrationConfig = getExpectedMigrationConfigList()
       const errMsg = JSON.stringify(getBaseExecutionList())
-  
+
       let utilExecRunCount = 0
-  
+
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const utilExecFn = utilExec.mockImplementation(async (cmd: string, args: string[]) => {
         if (utilExecRunCount++ === 0) {
@@ -130,10 +129,10 @@ describe('atlas', () => {
         }
         return Promise.reject(new Error(errMsg))
       })
-  
+
       const response = await atlas.run(migrationConfig)
       expect(response).toEqual(AtlasMigrationExecutionResponse.build(errMsg))
-  
+
       expect(utilExecFn).toHaveBeenCalledTimes(2)
       expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
         'migrate',
@@ -141,7 +140,7 @@ describe('atlas', () => {
         '--dir',
         `file://${migrationConfig.dir}`
       ])
-  
+
       expect(utilExecFn).toHaveBeenNthCalledWith(2, 'atlas', [
         'migrate',
         'apply',
@@ -160,13 +159,13 @@ describe('atlas', () => {
         `${migrationConfig.databaseUrl}`
       ])
     })
-  
+
     it('should throw on unexpected response', async () => {
       const migrationConfig = getExpectedMigrationConfigList()
       const errMsg = 'Some unwanted error'
-  
+
       let utilExecRunCount = 0
-  
+
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const utilExecFn = utilExec.mockImplementation(async (cmd: string, args: string[]) => {
         utilExecRunCount++
@@ -175,9 +174,9 @@ describe('atlas', () => {
         }
         return Promise.reject(new Error(errMsg))
       })
-  
+
       const response = await atlas.run(migrationConfig)
-  
+
       expect(response).toEqual(AtlasMigrationExecutionResponse.fromError(errMsg))
       expect(utilExecFn).toHaveBeenCalledTimes(2)
       expect(utilExecFn).toHaveBeenNthCalledWith(1, 'atlas', [
@@ -195,27 +194,26 @@ describe('atlas', () => {
       migrationConfig = getExpectedMigrationConfigList()
       migrationConfig.baseline = '00000000000000_baseline.sql'
     })
-    const checkAtlasSchemaDrift = (utilExecFn: jest.SpyInstance, migrationConfig: MigrationConfig) => {
+    const checkAtlasSchemaDrift = (utilExecFn: jest.SpyInstance, mgConfig: MigrationConfig): void => {
       expect(utilExecFn).toHaveBeenCalledTimes(1)
       expect(utilExecFn).toHaveBeenCalledWith('atlas', [
         'schema',
         'diff',
         '--from',
-        `file://${migrationConfig.dir}`,
+        `file://${mgConfig.dir}`,
         '--to',
         'postgres://root:secret@db.host:5432/appdb',
         '--dev-url',
-        'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled',
+        'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled&search_path=public',
         '--format',
-        '"{{ sql . "  " }}"',
+        '"{{ sql . "  " }}"'
       ])
     }
 
     it('should return no drift when no string is returned', async () => {
-      const utilExecFn = utilExec.mockImplementationOnce(() => "")
+      const utilExecFn = utilExec.mockImplementationOnce(() => '')
 
       const drift = await atlas.drift(migrationConfig)
-
 
       checkAtlasSchemaDrift(utilExecFn, migrationConfig)
       expect(drift.getStatements().length).toEqual(0)
@@ -233,13 +231,15 @@ describe('atlas', () => {
     })
 
     it('should return drifts', async () => {
-      const utilExecFn = utilExec.mockImplementationOnce(() => `-- Add new schema names "repack"
+      const utilExecFn = utilExec.mockImplementationOnce(
+        () => `-- Add new schema names "repack"
 CREATE SCHEMA "repack";
 -- CREATE "new_table" table
 CREATE TABLE "public"."new_table" (
   "version" character varying NOT NULL,
   PRIMARY KEY ("version")
-);`)
+);`
+      )
 
       const drift = await atlas.drift(migrationConfig)
 
@@ -251,7 +251,8 @@ CREATE TABLE "public"."new_table" (
         },
         {
           comment: '-- CREATE "new_table" table',
-          command: 'CREATE TABLE "public"."new_table" (\n' +
+          command:
+            'CREATE TABLE "public"."new_table" (\n' +
             '  "version" character varying NOT NULL,\n' +
             '  PRIMARY KEY ("version")\n' +
             ');\n'
@@ -261,7 +262,9 @@ CREATE TABLE "public"."new_table" (
     })
 
     it('should capture unexpected error from drift', async () => {
-      const utilExecFn = utilExec.mockImplementationOnce(() => 'Error: cannot diff a schema with a database connection: "public" <> ""')
+      const utilExecFn = utilExec.mockImplementationOnce(
+        () => 'Error: cannot diff a schema with a database connection: "public" <> ""'
+      )
 
       const drift = await atlas.drift(migrationConfig)
 
@@ -285,7 +288,7 @@ CREATE TABLE "public"."new_table" (
       expect(drift.getStatements().length).toEqual(0)
       expect(drift.getError()).toEqual(driftCmdOutput)
     })
-    
+
     it('should capture uncaught exception', async () => {
       const utilExecFn = utilExec.mockRejectedValue(new Error('some error'))
 

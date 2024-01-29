@@ -332,11 +332,11 @@ export type DriftStatement = {
  * migration files and the actual schema in the database.
  */
 export class DriftResponse implements DriftExecutionResponse {
-  private statements: DriftStatement[];
-  private error?: string;
+  private statements: DriftStatement[]
+  private error?: string
 
   private constructor(statements: DriftStatement[]) {
-    this.statements = statements;
+    this.statements = statements
   }
 
   static fromError(error: string): DriftResponse {
@@ -365,7 +365,7 @@ export class DriftResponse implements DriftExecutionResponse {
       return new DriftResponse([])
     }
     const lines = responseCopy.split('\n')
-    
+
     const statements: DriftStatement[] = []
 
     let currentCommand = ''
@@ -375,7 +375,7 @@ export class DriftResponse implements DriftExecutionResponse {
       if (trimmedLine.startsWith('--')) {
         comment = trimmedLine
       } else {
-        currentCommand += line + '\n'
+        currentCommand += `${line}\n`
         if (trimmedLine.endsWith(';')) {
           if (!comment) {
             /*
@@ -399,7 +399,7 @@ export class DriftResponse implements DriftExecutionResponse {
     if (statements.length === 0 && response) {
       return DriftResponse.fromError(response)
     }
-    return new DriftResponse(statements);
+    return new DriftResponse(statements)
   }
 
   /**
@@ -407,7 +407,7 @@ export class DriftResponse implements DriftExecutionResponse {
    * @returns {DriftStatement[]} - The list of drift statements.
    */
   getStatements(): DriftStatement[] {
-    return this.statements;
+    return this.statements
   }
 
   /**

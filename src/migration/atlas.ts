@@ -110,7 +110,7 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
  * @returns {string} - The modified database URL without the 'search_path' parameter.
  */
 function removeSearchPathFromURL(dbURL: string): string {
-  const urlObj = new URL(dbURL);
+  const urlObj = new URL(dbURL)
   urlObj.searchParams.delete('search_path')
   return urlObj.href
 }
@@ -119,7 +119,7 @@ function removeSearchPathFromURL(dbURL: string): string {
  * Executes the drift detection command using Atlas CLI.
  * Drift detection is the process of identifying differences between the database schema in the
  * migration files and the actual schema in the database.
- * 
+ *
  * TODO:
  * - Check if `atlas schema diff` has a command to get diffs in `JSON format`. Till v0.18.0, it does not has any.
  *  - Check [SchemaDiffFuncs](https://github.com/ariga/atlas/blob/master/cmd/atlas/internal/cmdlog/cmdlog.go#L874-L876) variable
@@ -137,16 +137,17 @@ async function drift(migrationConfig: MigrationConfig): Promise<DriftExecutionRe
       '--to',
       removeSearchPathFromURL(migrationConfig.databaseUrl),
       '--dev-url',
-      removeSearchPathFromURL(migrationConfig.devUrl),
+      migrationConfig.devUrl,
       '--format',
-      '"{{ sql . "  " }}"',
-    ];
+      '"{{ sql . "  " }}"'
+    ]
 
     core.debug(`Drift detection for directory ${migrationConfig.dir}`)
-    const response = await util.exec('atlas', driftArgs);
-    return DriftResponse.build(response);
+    const response = await util.exec('atlas', driftArgs)
+    return DriftResponse.build(response)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (ex: any) {
-    core.error(`ErrorDrift[tmp_dir=${migrationConfig.dir}]: ${ex} ${ex.stack}`);
+    core.error(`ErrorDrift[tmp_dir=${migrationConfig.dir}]: ${ex} ${ex.stack}`)
     return DriftResponse.fromError(ex.message)
   }
 }

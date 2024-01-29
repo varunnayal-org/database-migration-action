@@ -55,19 +55,20 @@ export function getMockDirectories(): Record<string, any> {
 
 export function getMigrationConfigList(
   dir = '.',
-  databaseUrl = 'test',
+  databaseUrl = '',
   baseDir = 'migrations',
-  devUrl = 'test'
+  devUrl = ''
 ): MigrationConfig[] {
   return [
     {
       dir: path.join(TEMP_DIR_FOR_MIGRATION, dir),
       originalDir: path.join(baseDir, dir),
       relativeDir: path.join(baseDir, dir),
-      databaseUrl,
+      databaseUrl: databaseUrl === '' ? 'postgres://root:secret@db.host:5432/appdb?search_path=public' : databaseUrl,
       baseline: undefined,
       dryRun: true,
-      devUrl
+      devUrl:
+        devUrl === '' ? 'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled&search_path=public' : devUrl
     }
   ]
 }
