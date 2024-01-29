@@ -1,7 +1,7 @@
 import * as core from '@actions/core'
 import * as util from '../util'
-import { AtlasLintResponse, AtlasMigrationExecutionResponse } from './atlas-class'
-import { MigrationConfig, MigrationExecutionResponse } from '../types'
+import { AtlasLintResponse, AtlasMigrationExecutionResponse, DriftResponse } from './atlas-class'
+import { DriftExecutionResponse, MigrationConfig, MigrationExecutionResponse } from '../types'
 import { ATLAS_CONFIG_FILE_NAME, ATLAS_HCL } from '../constants'
 
 process.env.ATLAS_NO_UPDATE_NOTIFIER = '0'
@@ -102,4 +102,53 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
   }
 }
 
-export { run, lint, getAtlasHCLFile }
+/**
+ * Removes the 'search_path' parameter from the database URL.
+ * This is typically used to prepare the URL for drift detection, where the search path is not required.
+ *
+ * @param {string} dbURL - The original database URL.
+ * @returns {string} - The modified database URL without the 'search_path' parameter.
+ */
+function removeSearchPathFromURL(dbURL: string): string {
+  const urlObj = new URL(dbURL);
+  urlObj.searchParams.delete('search_path')
+  return urlObj.href
+}
+
+/**
+ * Executes the drift detection command using Atlas CLI.
+ * Drift detection is the process of identifying differences between the database schema in the
+ * migration files and the actual schema in the database.
+ * 
+ * TODO:
+ * - Check if `atlas schema diff` has a command to get diffs in `JSON format`. Till v0.18.0, it does not has any.
+ *  - Check [SchemaDiffFuncs](https://github.com/ariga/atlas/blob/master/cmd/atlas/internal/cmdlog/cmdlog.go#L874-L876) variable
+ *
+ * @param {MigrationConfig} migrationConfig - The configuration for the migration.
+ * @returns {Promise<DriftExecutionResponse>} - The response from the drift detection execution
+ */
+async function drift(migrationConfig: MigrationConfig): Promise<DriftExecutionResponse> {
+  try {
+    const driftArgs = [
+      'schema',
+      'diff',
+      '--from',
+      getDirArg(migrationConfig.dir),
+      '--to',
+      removeSearchPathFromURL(migrationConfig.databaseUrl),
+      '--dev-url',
+      removeSearchPathFromURL(migrationConfig.devUrl),
+      '--format',
+      '"{{ sql . "  " }}"',
+    ];
+
+    core.debug(`Drift detection for directory ${migrationConfig.dir}`)
+    const response = await util.exec('atlas', driftArgs);
+    return DriftResponse.build(response);
+  } catch (ex: any) {
+    core.error(`ErrorDrift[tmp_dir=${migrationConfig.dir}]: ${ex} ${ex.stack}`);
+    return DriftResponse.fromError(ex.message)
+  }
+}
+
+export { run, lint, drift, getAtlasHCLFile }

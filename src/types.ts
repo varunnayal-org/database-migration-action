@@ -327,6 +327,16 @@ export type MigrationMeta = {
     }
 )
 
+export type DriftStatement = {
+  comment: string
+  command: string
+}
+
+export interface DriftExecutionResponse {
+  getStatements(): DriftStatement[]
+  getError(): string | undefined
+}
+
 /**
  * Represents an error that occurred during the execution of a database migration version.
  */

@@ -20,7 +20,7 @@ export const LINT_SKIP_ERROR_LABEL_PREFIX = 'db-migration:lint:skip:'
 export const TEMP_DIR_FOR_MIGRATION = 'tmp/__migrations__'
 export const ATLAS_CONFIG_FILE_NAME = 'atlas.hcl'
 export const ALLOWED_CHANGED_FILE_EXTENSION = ['.yml', '.yaml', '.sql', '.sum', '.hcl', '.xml', '.json']
-
+export const ATLAS_NO_DRIFT_STR = 'Schemas are synced, no changes to be made.'
 // Atlas HCL file for linting (https://atlasgo.io/lint/analyzers)
 export const ATLAS_HCL = `lint {
     destructive { // prefix: DS
