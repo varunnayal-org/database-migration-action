@@ -1,39 +1,36 @@
-import { getOctokit } from '@actions/github'
-import { getInput } from '../util'
-// eslint-disable-next-line import/no-unresolved
-import { OctokitOptions } from '@octokit/core/dist-types/types'
+import * as core from '@actions/core'
 // eslint-disable-next-line import/named
 import { RestEndpointMethodTypes } from '@octokit/rest'
 // eslint-disable-next-line import/no-unresolved
 import { OctokitResponse } from '@octokit/types'
+import {
+  GHClient,
+  IssueCreateCommentResponse,
+  IssueUpdateCommentResponse,
+  PullRequestUpdateResponse,
+  IssueAddLabelResponse,
+  GetUserForTeamsResponse,
+  GithubClient
+} from '../../src/types.gha'
 
-type GithubClient = ReturnType<typeof getOctokit> // InstanceType<typeof GitHub>
+// type GithubClient = ReturnType<typeof github.getOctokit> // InstanceType<typeof GitHub>
 
-export type IssueCreateCommentResponse = RestEndpointMethodTypes['issues']['createComment']['response']['data']
-export type IssueUpdateCommentResponse = RestEndpointMethodTypes['issues']['updateComment']['response']['data']
-type IssueAddLabelResponse = RestEndpointMethodTypes['issues']['addLabels']['response']['data']
-type GetUserForTeamsResponse = Record<string, string[]>
+// function buildOctokit(token: string, opts: OctokitOptions = {}): GithubClient {
+//   const debugStr = getInput('debug', 'false').toLowerCase()
+//   return github.getOctokit(token, {
+//     debug: debugStr === 'true' || debugStr === '1',
+//     ...opts
+//   })
+// }
 
-function buildOctokit(token: string, opts: OctokitOptions = {}): GithubClient {
-  const debugStr = getInput('debug', 'false').toLowerCase()
-  return getOctokit(token, {
-    debug: debugStr === 'true' || debugStr === '1',
-    ...opts
-  })
-}
-
-class Client {
+class Client implements GHClient {
   #organization = ''
   #repoOwner = ''
   #repoName = ''
   #client: GithubClient
 
-  constructor(repoToken: string, opts?: OctokitOptions) {
-    this.#client = buildOctokit(repoToken, opts)
-  }
-
-  static fromEnv(opts?: OctokitOptions): Client {
-    return new Client(getInput('repo_token'), opts)
+  constructor(client: GithubClient) {
+    this.#client = client
   }
 
   setOrg(organization: string, repoOwner: string, repoName: string): this {
@@ -97,10 +94,10 @@ class Client {
   }
 
   #validateAPIResponse<T>(errMsg: string, response: OctokitResponse<T>): T {
-    // console.debug(response)
     if (!response) {
-      console.error(response)
-      throw new Error(errMsg)
+      const msg = `GitHub API Failed(${errMsg})`
+      core.error(msg)
+      throw new Error(msg)
     }
     return response.data
   }
@@ -115,7 +112,7 @@ class Client {
     const query = `query($owner: String!, $repoName: String!, $prNumber: Int!) {
   repository(owner: $owner, name: $repoName) {
     pullRequest(number: $prNumber) {
-      reviews(first: 20, states: APPROVED) {
+      reviews(last: 20, states: APPROVED) {
         nodes {
           author {
             login
@@ -144,6 +141,7 @@ class Client {
   }
 
   async addComment(prNumber: number, message: string): Promise<IssueCreateCommentResponse> {
+    core.debug(`Adding github comment=${message}`)
     return this.#validateAPIResponse(
       'Add comment',
       await this.#client.rest.issues.createComment({
@@ -156,6 +154,7 @@ class Client {
   }
 
   async updateComment(commentId: number, message: string): Promise<IssueUpdateCommentResponse> {
+    core.debug(`Updating github comment ${commentId}\nMsg=${message}`)
     return this.#validateAPIResponse(
       'Add comment',
       await this.#client.rest.issues.updateComment({
@@ -167,28 +166,41 @@ class Client {
     )
   }
 
-  async addLabel(prNumber: number, label: string): Promise<IssueAddLabelResponse> {
+  async addLabel(prNumber: number, labels: string[]): Promise<IssueAddLabelResponse> {
     return this.#validateAPIResponse(
       'Add Label',
       await this.#client.rest.issues.addLabels({
         owner: this.#repoOwner,
         repo: this.#repoName,
         issue_number: prNumber,
-        labels: [label]
+        labels
       })
     )
   }
 
+  #tryGetPullRequest(): RestEndpointMethodTypes['pulls']['get']['response']['data'] | undefined {
+    try {
+      const pr = JSON.parse(process.env.PR_DETAILS || '') as RestEndpointMethodTypes['pulls']['get']['response']['data']
+      core.debug('Fetched PR Details from env')
+
+      return pr
+    } catch (ex) {
+      return undefined
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getPRInformation(prNumber: number): Promise<any> {
-    const pr = this.#validateAPIResponse(
-      'Get PR Information',
-      await this.#client.rest.pulls.get({
-        owner: this.#repoOwner,
-        repo: this.#repoName,
-        pull_number: prNumber
-      })
-    )
+    const pr =
+      this.#tryGetPullRequest() ||
+      this.#validateAPIResponse(
+        'Get PR Information',
+        await this.#client.rest.pulls.get({
+          owner: this.#repoOwner,
+          repo: this.#repoName,
+          pull_number: prNumber
+        })
+      )
     return {
       defaultBranchRef: {
         name: pr.base.repo.default_branch
@@ -210,6 +222,54 @@ class Client {
         }
       }
     }
+  }
+
+  #tryGetChangedFiles(): string[] | undefined {
+    try {
+      const changedFiles = JSON.parse(process.env.PR_CHANGED_FILES || '') as string[]
+      core.debug('Fetched PR Changed files from env')
+      return changedFiles
+    } catch (ex) {
+      return undefined
+    }
+  }
+
+  async getChangedFiles(prNumber: number): Promise<string[]> {
+    const changedFileListFromEnv = this.#tryGetChangedFiles()
+    if (changedFileListFromEnv !== undefined) {
+      core.info(`Changed Files from env: ${JSON.stringify(changedFileListFromEnv)}`)
+      return changedFileListFromEnv
+    }
+    const response = this.#validateAPIResponse(
+      'Get Changed Files',
+      await this.#client.rest.pulls.listFiles({
+        owner: this.#repoOwner,
+        repo: this.#repoName,
+        pull_number: prNumber,
+        per_page: 3000
+      })
+    )
+
+    return response
+      .filter(
+        file =>
+          file.status === 'added' || file.status === 'modified' || file.status === 'renamed' || file.status === 'copied'
+      )
+      .map(file => file.filename)
+  }
+
+  async closePR(prNumber: number, body: string): Promise<PullRequestUpdateResponse> {
+    core.debug('Closing PR')
+    return this.#validateAPIResponse(
+      'Close PR',
+      await this.#client.rest.pulls.update({
+        owner: this.#repoOwner,
+        repo: this.#repoName,
+        pull_number: prNumber,
+        state: 'closed',
+        body
+      })
+    )
   }
 }
 

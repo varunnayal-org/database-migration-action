@@ -8,14 +8,23 @@ inputs:
   repo_token:
     description: 'GitHub token'
     required: true
+  jira_username:
+    description: JIRA username
+  jira_password:
+    description: JIRA password
+  jira_config:
+    description: 'JIRA config token having following keys host, project, issueType("Story"), fields.pr, fields.prLabel, fields?.repo, fields.driApprovals, approvalStatus("DONE"), doneValue("Done")'
+    required: true
   aws_secret_store:
     description: AWS Secret ID where database connection strings are stored
   migration_config_file:
     description: 'Migration configuration file'
     default: './db.migration.json'
+  dev_db_url:
+    description: 'Used to run lint operation against this DB'
   atlas_version:
     description: Atlas version
-    default: v0.15.0
+    default: v0.18.0
   debug:
     description: 'show debug logs (true|false)'
     default: 'false'
@@ -72,18 +81,37 @@ runs:
         head_sha=$(echo $PR_DETAILS | jq -rc .head.sha)
         labels=$(echo $PR_DETAILS | jq -rc .head.sha)
         echo "PR_DETAILS=$PR_DETAILS" >> $GITHUB_ENV
+        echo "pr=$PR_DETAILS" >> $GITHUB_OUTPUT
         echo "head_sha=$head_sha" >> $GITHUB_OUTPUT
         echo "labels=$labels" >> $GITHUB_OUTPUT
 
     - name: checkout repo for PR Comments
-      uses: actions/checkout@v3
-      if: ${{ steps.checks.outputs.pr_comment == '1' }}
+      uses: actions/checkout@v4
+      if: ${{ steps.checks.outputs.can_execute == '1' }}
       with:
+        persist-credentials: false
+        # If empty, defaults to process.env.GITHUB_SHA
         ref: ${{ steps.pr_details.outputs.head_sha }}
+        # Checkout repo as we will do git diff for finding files
+        fetch-depth: 0
 
-    - name: checkout repo for PR Events
-      if: (steps.checks.outputs.can_execute == '1' && steps.checks.outputs.pr_comment != '1')
-      uses: actions/checkout@v3
+    - name: get changed files
+      id: changed-files
+      if: ${{ steps.checks.outputs.pr == '1' }}
+      uses: tj-actions/changed-files@v40
+      with:
+        json: true
+
+    # - name: set changed files
+    #   if: ${{ steps.checks.outputs.pr == '1' }}
+    #   shell: bash
+    #   run: |
+    #     echo "Called Set Changed Files in Env Var"
+    #     echo "PR_CHANGED_FILES=${{ steps.changed-files.outputs.all_changed_files }}"
+
+    # - name: checkout repo for PR Events
+    #   if: (steps.checks.outputs.can_execute == '1' && steps.checks.outputs.pr_comment != '1')
+    #   uses: actions/checkout@v3
 
     - name: Cache atlas
       id: cache-atlas
@@ -96,7 +124,7 @@ runs:
     - name: setup atlas
       shell: bash
       if: (steps.checks.outputs.can_execute == '1' && steps.cache-atlas.outputs.cache-hit != 'true')
-      run: curl -sSf https://atlasgo.sh | ATLAS_VERSION=${{inputs.atlas_version}} CI=true sh
+      run: curl -sSf https://atlasgo.sh | ATLAS_VERSION=${{inputs.atlas_version}} CI=true sh -s -- --community
 
     - name: setup_node
       uses: actions/setup-node@v4
@@ -110,7 +138,13 @@ runs:
       run: node $GITHUB_ACTION_PATH/dist/index.js
       env:
         INPUT_REPO_TOKEN: ${{ inputs.repo_token }}
+        INPUT_JIRA_USERNAME: ${{ inputs.jira_username }}
+        INPUT_JIRA_PASSWORD: ${{ inputs.jira_password }}
+        INPUT_JIRA_CONFIG: ${{ inputs.jira_config }}
         INPUT_AWS_SECRET_STORE: ${{ inputs.aws_secret_store }}
         INPUT_MIGRATION_CONFIG_FILE: ${{ inputs.migration_config_file }}
+        INPUT_DEV_DB_URL: ${{ inputs.dev_db_url }}
         INPUT_DEBUG: ${{ inputs.debug }}
         INPUT_DB_MIGRATION_ECHO_URL: ${{ inputs.db_migration_echo_url}}
+        PR_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files || '' }}
+        PR_DETAILS: ${{ steps.checks.outputs.pr || '' }}

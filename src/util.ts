@@ -1,7 +1,17 @@
-import * as core from '@actions/core'
 import { spawn } from 'child_process'
 import fs from 'fs'
-import { MigrationResponse } from './types'
+import path from 'path'
+import * as core from '@actions/core'
+
+export const hasExtension = (file: string, ext: string): boolean => path.extname(file) === ext
+export const hasExtensions = (file: string, exts: string[]): boolean => exts.includes(path.extname(file))
+
+export function getRelativePathForDbDirectory(directory: string): string {
+  if (process.env.LOCAL_TESTING_REPO_DIR) {
+    return path.relative(process.env.LOCAL_TESTING_REPO_DIR, directory)
+  }
+  return directory
+}
 
 export type CommentBuilderHandler = (boldText: string, msg?: string) => string
 
@@ -53,41 +63,6 @@ function readableDate(): string {
   })
 }
 
-function commentBuilder(msgPrefix: string, htmlURL: string, isJiraEvent: boolean): CommentBuilderHandler {
-  return (boldText: string, msg?: string): string => {
-    let returnMsg = `**${msgPrefix} ${boldText}** ${readableDate()} (${buildExecutionMarkdown(htmlURL, isJiraEvent)})`
-    if (msg) {
-      returnMsg = `${returnMsg}: ${msg}`
-    }
-    return returnMsg
-  }
-}
-
-function buildExecutionMarkdown(htmlURL: string, isJiraEvent: boolean): string {
-  const executionURL = `${htmlURL}/actions/runs/${process.env.GITHUB_RUN_ID}/attempts/${process.env.GITHUB_RUN_ATTEMPT}`
-  if (isJiraEvent !== true) {
-    return `[Execution](${executionURL})`
-  }
-  return `[Execution|${executionURL}]`
-}
-
-function getFileListingForComment(migrationFileListByDirectory: MigrationResponse[], dbDirList: string[]): string {
-  return migrationFileListByDirectory
-    .reduce<string[]>(
-      (acc, response, idx) => {
-        acc.push(`- Directory: **'${dbDirList[idx]}'**`)
-        if (response.response === '') {
-          acc.push('  Files: NA')
-        } else {
-          acc.push(`\`\`\`\n${response.response}\n\`\`\``)
-        }
-        return acc
-      },
-      ['']
-    )
-    .join('\r\n')
-}
-
 async function exec(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     // Spawn the process
@@ -113,18 +88,83 @@ async function exec(command: string, args: string[]): Promise<string> {
     // Resolve the promise when the process exits
     process.on('close', code => {
       output = output.trim()
-      core.debug(`Command: ${command} ${args.join(' ')}\n\tcode=${code} output=${output}`)
+      if (output.startsWith('"') && output.endsWith('"')) {
+        output = output.slice(1, -1)
+      }
+      core.debug(`Command: ${[command, ...args.slice(0, -1), '***']}code=${code} output=${output}`)
       if (code === 0) {
         resolve(output)
       } else {
-        let errMsg = `Process "${command} ${args.join(' ')}" exited with code ${code}`
-        if (output) {
-          errMsg += `\n${output}`
-        }
-        reject(new Error(errMsg))
+        reject(new Error(output))
       }
     })
   })
 }
 
-export { createTempDir, removeDir, cleanDir, getEnv, getInput, commentBuilder, getFileListingForComment, exec }
+/**
+ * Filters out files that are not present in the pathPrefixList
+ * @param pathPrefixList
+ * @param changedFiles
+ */
+function globFromList(
+  migrationDirPathList: string[],
+  changedFiles: string[]
+): { matched: string[][]; unmatched: string[] } {
+  const matched: string[][] = migrationDirPathList.map(() => [])
+  const unmatched: string[] = []
+
+  // eslint-disable-next-line @typescript-eslint/prefer-for-of
+  for (let fileIdx = 0; fileIdx < changedFiles.length; fileIdx++) {
+    const changedFile = changedFiles[fileIdx]
+    let matchMigrationDirIdx = -1
+    for (let idx = 0; idx < migrationDirPathList.length; idx++) {
+      const migrationDirPath = migrationDirPathList[idx]
+
+      if (changedFile.startsWith(migrationDirPath)) {
+        matchMigrationDirIdx = idx
+        break
+      }
+    }
+
+    // no match found
+    if (matchMigrationDirIdx === -1) {
+      unmatched.push(changedFile)
+      continue
+    }
+
+    matched[matchMigrationDirIdx].push(changedFile)
+  }
+
+  return { matched, unmatched }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function executeWithRetry<T = any>(
+  fn: () => Promise<T>,
+  errPrefix: string,
+  maxRetryCount = 3,
+  minWaitMS = 500,
+  maxWaitMS = 2000
+): Promise<T> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let err: any
+  for (let i = 1; i <= maxRetryCount; ++i) {
+    try {
+      return fn()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (ex: any) {
+      if (!err) {
+        err = ex
+      }
+      if (i < maxRetryCount) {
+        const randomWaitMS = Math.floor(Math.random() * (maxWaitMS - minWaitMS + 1) + minWaitMS)
+        setTimeout(() => {}, randomWaitMS)
+        continue
+      }
+    }
+  }
+  core.error(`${errPrefix} Error: ${err.message}`)
+  throw err
+}
+
+export { createTempDir, removeDir, cleanDir, getEnv, getInput, exec, readableDate, globFromList, executeWithRetry }

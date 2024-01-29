@@ -1,0 +1,169 @@
+@startuml
+scale 1000 width
+
+state event_received <<choice>>
+note left of event_received
+Type of GitHub event
+  - PR
+  - PR review
+  - PR comment
+end note
+
+state command_choice <<choice>>
+note right of command_choice
+  **Commands**
+  - db migrate dry-run
+  - db migrate jira
+  - db migrate
+end note
+
+state PR
+PR: PR (re)opened, synchronize
+state Review
+Review: PR approved
+state Comment
+Comment: Process comment
+
+[*] --> event_received
+event_received --> PR: Event: PR
+event_received --> Review: Event: PR Review
+event_received --> Comment: Event: PR Comment
+
+PR --> DryRunMigration
+Review --> DryRunMigration
+
+
+Comment --> command_choice
+
+command_choice --> DryRunMigration : [**db migrate dry-run**]
+command_choice --> DryRunMigration : [**db migrate jira**]
+command_choice --> ApplyMigration : [**db migrate**]
+
+state DryRunMigration {
+  state "Process Dry Run" as dry_run
+  state can_run_lint <<choice>>
+  state error_lint <<choice>>
+  state error_choice <<choice>>
+  state comment_choice <<choice>>
+
+
+  can_run_lint --> Lint : [yes]
+  can_run_lint --> NoLint : [no]
+
+  Lint --> error_lint
+  error_lint --> dry_run : [no error]
+  error_lint --> AddGithubComment : [hasError]
+
+  NoLint --> error_choice
+
+  error_choice --> AddGithubComment : [hasError]
+  error_choice --> NoError: [No Erorr]
+  NoError --> comment_choice
+
+  AddGithubComment --> AddJiraComment
+
+  AddJiraComment --> [*]
+
+  AddJiraComment: There could be cases where Jira Issue is not present
+  AddJiraComment: In that case **db migrate jira** command should be used
+
+  comment_choice --> BuildIssueOrComment : [Has migrations]
+  comment_choice --> NoComment : [No migrations]
+
+  BuildIssueOrComment --> [*]
+  NoComment --> [*]
+}
+
+state ApplyMigration {
+  state PrepareMigration
+
+  state has_validation_errors <<choice>>
+  note right of has_validation_errors
+  **Validation Errors?**
+  could be due to
+  - Missing DB connection string
+  - Github approvals, if required, not acquired
+  - Jira approvals, if required, not acquired
+  - Comment owner not part of Owner Team
+  end note
+
+  state has_execution_error <<choice>>
+  note left of has_execution_error
+  **Execution Error?**
+  could be due to
+  - Partial execution of migrations
+  - Database not clean
+  - Incorrect connection string
+  - others
+  end note
+
+  state ErrorComments
+  ErrorComments: Add Github Comment
+  ErrorComments: Add Jira Comment
+  state SuccessComments
+  SuccessComments: Add Github Comment
+  SuccessComments: Add Jira Comment
+
+
+  dry_run --> error_choice
+
+  error_choice --> AddGithubComment : [hasError]
+  error_choice --> NoError: [No Erorr]
+  NoError --> comment_choice
+
+  AddGithubComment --> AddJiraComment
+
+  AddJiraComment --> [*]
+
+  AddJiraComment: There could be cases where Jira Issue is not present
+  AddJiraComment: In that case **db migrate jira** command should be used
+
+  comment_choice --> BuildIssueOrComment : [Has migrations]
+  comment_choice --> NoComment : [No migrations]
+
+  BuildIssueOrComment --> [*]
+  NoComment --> [*]
+}
+
+state ApplyMigration {
+  state PrepareMigration
+
+  state has_validation_errors <<choice>>
+  note right of has_validation_errors
+  **Validation Errors?**
+  could be due to
+  - Missing DB connection string
+  - Github approvals, if required, not acquired
+  - Jira approvals, if required, not acquired
+  - Comment owner not part of Owner Team
+  end note
+
+  state has_execution_error <<choice>>
+  note left of has_execution_error
+  **Execution Error?**
+  could be due to
+  - Partial execution of migrations
+  - Database not clean
+  - Incorrect connection string
+  - others
+  end note
+
+  state ErrorComments
+  ErrorComments: Add Github Comment
+  ErrorComments: Add Jira Comment
+  state SuccessComments
+  SuccessComments: Add Github Comment
+  SuccessComments: Add Jira Comment
+
+
+  PrepareMigration --> has_validation_errors
+  has_validation_errors --> ErrorComments : yes
+  has_validation_errors --> has_execution_error : no
+  has_execution_error --> SuccessComments : no
+  has_execution_error --> ErrorComments : yes
+
+  ErrorComments --> [*]
+  SuccessComments --> [*]
+
+}
+@enduml

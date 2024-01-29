@@ -4,7 +4,7 @@
 
 1. Ensure sample event files are handy
 1. Install [nektos/act](https://github.com/nektos/act)
-1. Setup postgres. Say, connection URL is `postgres://user:pass@localhost:5432/migration-db`
+1. Setup postgres. Say, connection URL is `postgres://user:pass@localhost:5432/migration-db&search_path=public`
 1. Start `ngrok`. Use [ngrok.yml](https://ngrok.com/docs/agent/config/) or run `ngrok config check` to find configuration file location
 
     ```sh
@@ -39,11 +39,11 @@
 
     # Create
     secretsmanager create-secret --name $SECRET_NAME --secret-string \
-    '{"DB_URL": "postgres://postgres://user:pass@host:port/dbname"}'
+    '{"DB_URL": "postgres://postgres://user:pass@host:port/dbname?search_path={schema-name}"}'
 
     # Update
     secretsmanager put-secret-value --name $SECRET_NAME --secret-string \
-    '{"DB_URL": "postgres://postgres://user:pass@host:port/dbname"}'
+    '{"DB_URL": "postgres://postgres://user:pass@host:port/dbname?search_path={schema-name}"}'
     ```
 
 ### Testing from workflow repository

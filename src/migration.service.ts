@@ -1,77 +1,90 @@
 import * as core from '@actions/core'
-import GHClient, { IssueCreateCommentResponse, IssueUpdateCommentResponse } from './client/github'
-import AWSClient from './client/aws'
-import { Config } from './config'
 import * as gha from './types.gha'
-import { runMigrationFromList, buildMigrationConfigList, getDirectoryForDb } from './migration'
+import { JiraIssue, JiraClient } from './types.jira'
+import * as migration from './migration/migration'
 import {
-  MigrationRunListResponse,
+  Config,
   MatchTeamWithPRApproverResult,
   RunMigrationResult,
   MigrationMeta,
-  MigrationResponse
+  MigrationLintResponse,
+  MigrationConfig,
+  ChangedFileValidationError,
+  NotifyParams,
+  NotifyResponse,
+  Builder
 } from './types'
-import { commentBuilder, getFileListingForComment } from './util'
+import { VaultClient } from './client/vault/types'
+import * as validators from './validators'
+import {
+  CMD_DRY_RUN,
+  CMD_DRY_RUN_JIRA,
+  CMD_APPLY,
+  NO_MIGRATION_AVAILABLE,
+  DEFAULT_PR_JIRA_TICKET_LABEL
+} from './constants'
 
 export default class MigrationService {
-  #client: GHClient
-  #aws: AWSClient
+  #ghClient: gha.GHClient
+  #jiraClient: JiraClient | null
+  #secretClient: VaultClient
   #config: Config
+  #factory: Builder
 
-  constructor(config: Config, client: GHClient, awsClient: AWSClient) {
+  constructor(config: Config, factory: Builder) {
     this.#config = config
-    this.#client = client
-    this.#aws = awsClient
+    this.#factory = factory
+
+    this.#ghClient = factory.getGithub()
+    this.#jiraClient = factory.getJira(config.jira)
+    this.#secretClient = factory.getVault()
   }
 
-  #validatePullRequest(pullRequest: gha.PullRequest): string | undefined {
-    const { base } = pullRequest
-    if (base.ref !== this.#config.baseBranch) {
-      return `Base branch should be ${this.#config.baseBranch}, found ${base.ref}`
-    } else if (pullRequest.state !== 'open') {
-      return `PR is in ${pullRequest.state} state`
-    } else if (pullRequest.draft) {
-      return 'PR is in draft state'
-    }
+  init(org: string, repoOwner: string, repoName: string): void {
+    this.#ghClient.setOrg(org, repoOwner, repoName)
   }
 
   #hasLabel(labels: gha.Label[], label: string): boolean {
     return labels.some(labelEntry => labelEntry.name === label)
   }
 
-  async #ensureLabel(prNumber: number, labels: gha.Label[], label: string): Promise<void> {
-    if (this.#hasLabel(labels, label)) {
-      return
+  async #ensureLabels(pullRequest: gha.PullRequest, jiraIssue?: JiraIssue): Promise<void> {
+    const labelsToAdd = []
+
+    if (this.#hasLabel(pullRequest.labels, this.#config.prLabel) === false) {
+      labelsToAdd.push(this.#config.prLabel)
     }
-    await this.#client.addLabel(prNumber, label)
+    if (jiraIssue && this.#hasLabel(pullRequest.labels, DEFAULT_PR_JIRA_TICKET_LABEL) === false) {
+      labelsToAdd.push(DEFAULT_PR_JIRA_TICKET_LABEL)
+    }
+
+    if (labelsToAdd.length > 0) {
+      await this.#ghClient.addLabel(pullRequest.number, labelsToAdd)
+    }
+  }
+
+  async #processChangedFileValidationError(
+    validationErr: ChangedFileValidationError,
+    pr: gha.PullRequest,
+    migrationMeta: MigrationMeta
+  ): Promise<void> {
+    await this.#buildCommentInfo(true, pr, migrationMeta, {
+      migrationRunListResponse: { migrationAvailable: false, executionResponseList: [] },
+      changedFileValidation: validationErr,
+      closePR: true
+    })
   }
 
   /**
-   * Add label if not present
    *
-   * @param {gha.ContextPullRequest} event
+   * @param prApprovedByUserList This list is empty even if PR has been approved if config.approvalTeams is empty
+   * @returns
    */
-  async #processPullRequest(event: gha.ContextPullRequest): Promise<RunMigrationResult> {
-    const { payload } = event
-    const result = await this.#runMigrationForDryRun(payload.pull_request, {
-      eventName: event.eventName,
-      actionName: payload.action,
-      source: 'pr',
-      triggeredBy: payload.pull_request.user
-    })
-
-    if (result.migrationAvailable) {
-      // We can create JIRA ticket if required
-      await this.#ensureLabel(payload.number, payload.pull_request.labels, this.#config.prLabel)
-    }
-    return result
-  }
-
   async #matchTeamWithPRApprovers(prApprovedByUserList: string[]): Promise<MatchTeamWithPRApproverResult> {
     // No need to call API when
-    // - no approvals are required
-    // - or, no one has approved the PR yet
-    if (prApprovedByUserList.length === 0) {
+    // - approvals are required
+    // - and, no one has approved the PR yet
+    if (this.#config.approvalTeams.length > 0 && prApprovedByUserList.length === 0) {
       return this.#config.approvalTeams.reduce<MatchTeamWithPRApproverResult>(
         (acc, teamName) => {
           acc.prApprovedUserListByTeam[teamName] = []
@@ -85,7 +98,7 @@ export default class MigrationService {
       )
     }
 
-    const teamByName = await this.#client.getUserForTeams(this.#config.allTeams, 100)
+    const teamByName = await this.#ghClient.getUserForTeams(this.#config.allTeams, 100)
 
     const result: MatchTeamWithPRApproverResult = {
       teamByName,
@@ -94,7 +107,7 @@ export default class MigrationService {
     }
 
     for (const teamName of this.#config.approvalTeams) {
-      const filteredMember = prApprovedByUserList.filter(user => teamByName[teamName].includes(user))
+      const filteredMember = prApprovedByUserList.filter(user => (teamByName[teamName] || []).includes(user))
       result.prApprovedUserListByTeam[teamName] = filteredMember
       if (filteredMember.length === 0) {
         result.approvalMissingFromTeam.push(teamName)
@@ -104,167 +117,110 @@ export default class MigrationService {
     return result
   }
 
-  async #addCommentWithFileListing(
+  async #buildCommentInfo(
+    dryRun: boolean,
     pullRequest: gha.PullRequest,
-    msg: string,
-    executionResponseList: MigrationResponse[],
-    migrationMeta: MigrationMeta
-  ): Promise<IssueUpdateCommentResponse | IssueCreateCommentResponse> {
-    const fileListForComment = getFileListingForComment(
-      executionResponseList,
-      this.#config.databases.map(db => getDirectoryForDb(this.#config.baseDirectory, db))
-    )
-
-    let commentId: number | undefined
-    let commentBody: string | undefined
-
-    if ('commentId' in migrationMeta) {
-      commentId = migrationMeta.commentId
-      commentBody = migrationMeta.commentBody
-    }
-
-    let commentHandler: (
-      commentIdOrPrNumber: number,
-      commentMsgToWrite: string
-    ) => Promise<IssueUpdateCommentResponse | IssueCreateCommentResponse>
-    let id = 0
-
-    let commentMsg = `${msg}\r\n${fileListForComment}`
-    core.summary.addRaw(commentMsg)
-    if (commentBody && commentId) {
-      commentHandler = this.#client.updateComment.bind(this.#client)
-      id = commentId
-      commentMsg = `${commentBody}\r\n\r\n${commentMsg}`
-      core.debug(`Updating comment=${commentId}\nMsg=${commentMsg}`)
-    } else {
-      commentHandler = this.#client.addComment.bind(this.#client)
-      id = pullRequest.number
-      commentMsg = `Executed By: @${migrationMeta.triggeredBy.login}\r\nReason=${migrationMeta.eventName}.${migrationMeta.actionName}\r\n${commentMsg}`
-      core.debug(`Adding comment ${commentMsg}`)
-    }
-
-    const response = await Promise.allSettled([core.summary.write(), commentHandler(id, commentMsg)])
-
-    if (response[1].status === 'rejected') {
-      throw response[1].reason
-    }
-
-    return response[1].value
-  }
-
-  async #handleDryRunResponse(
-    pullRequest: gha.PullRequest,
-    migrationRunListResponse: MigrationRunListResponse,
-    commentBuilderFn: (boldText: string, msg?: string) => string,
-    migrationMeta: MigrationMeta
-  ): Promise<void> {
-    let msg = ''
-    if (migrationRunListResponse.errMsg !== null) {
-      msg = commentBuilderFn('failed', migrationRunListResponse.errMsg)
-    } else if (migrationRunListResponse.migrationAvailable === false) {
-      msg = commentBuilderFn('failed', 'No migrations available')
-    } else {
-      msg = commentBuilderFn('successful')
-    }
-    await this.#addCommentWithFileListing(
+    migrationMeta: MigrationMeta,
+    params: NotifyParams
+  ): Promise<NotifyResponse> {
+    const notifier = this.#factory.getNotifier(
+      dryRun,
       pullRequest,
-      msg,
-      migrationRunListResponse.executionResponseList,
-      migrationMeta
+      migrationMeta,
+      this.#config,
+      this.#ghClient,
+      this.#jiraClient
     )
-  }
-
-  /**
-   * Check if user who triggered action is part of any service owner's team
-   * @param migrationMeta
-   * @param teamByName
-   * @returns
-   */
-  #validateOwnerTeam(migrationMeta: MigrationMeta, teamByName: { [key: string]: string[] }): boolean {
-    const triggeredByName = migrationMeta.triggeredBy.login
-
-    // check if user who triggered action is part of any team
-    return this.#config.ownerTeams.some(teamName => {
-      if (!teamByName[teamName]) {
-        return false
-      }
-      if (teamByName[teamName].includes(triggeredByName)) {
-        return true
-      }
-      return false
-    })
+    return await notifier.notify(params)
   }
 
   async #runMigrationsForExecution(
     pullRequest: gha.PullRequest,
     migrationMeta: MigrationMeta
   ): Promise<RunMigrationResult | null> {
+    // TODO: Check for label db-migration
     core.info(`fn:runMigrationsForExecution PR#${pullRequest.number}, Dry Run: true, Source=${migrationMeta.source}`)
-    const commentBuilderFn = commentBuilder('Migrations', pullRequest.base.repo.html_url, false)
-
     const [prApprovedByUserList, secretMap] = await Promise.all([
       this.#getRequiredApprovalList(pullRequest.number),
-      this.#aws.getSecrets(this.#config.dbSecretNameList)
+      this.#secretClient.getSecrets(this.#config.dbSecretNameList)
     ])
 
-    /**
-     * 1. Get migration file listing
-     * 2. Get github teams
-     */
-    const [teams, migrationConfigList] = await Promise.all([
-      // Fetch approved grouped by allowed teams
-      this.#matchTeamWithPRApprovers(prApprovedByUserList),
+    const [migrationConfigList, jiraIssue] = await Promise.all([
       // Build configuration
-      buildMigrationConfigList(this.#config.baseDirectory, this.#config.databases, secretMap)
+      migration.buildMigrationConfigList(
+        this.#config.baseDirectory,
+        this.#config.databases,
+        this.#config.devDBUrl,
+        secretMap
+      ),
+      // Fetch JIRA Issue
+      this.#jiraClient?.findIssue(pullRequest.html_url) ?? Promise.resolve(undefined)
     ])
 
-    core.debug(`matchTeamWithPRApprovers: ${JSON.stringify(teams)}`)
+    let failureMsg = validators.validateMigrationExecutionForJiraApproval(this.#config.jira, jiraIssue)
 
-    let failureMsg = ''
-    // If required approvals are not in place
-    if (teams.approvalMissingFromTeam.length > 0) {
-      failureMsg = `PR is not approved by ${teams.approvalMissingFromTeam
-        .map(teamName => `@${pullRequest.base.repo.owner.login}/${teamName}`)
-        .join(', ')}`
+    if (!failureMsg) {
+      // Fetch approved grouped by allowed teams
+      const teams = await this.#matchTeamWithPRApprovers(prApprovedByUserList)
+      core.debug(`matchTeamWithPRApprovers: ${JSON.stringify(teams)}`)
+      failureMsg = validators.validateMigrationExecutionForApproval(
+        pullRequest,
+        migrationMeta,
+        this.#config.ownerTeams,
+        teams
+      )
     }
-    // If user who triggered action is not part of any owner team
-    else if (this.#validateOwnerTeam(migrationMeta, teams.teamByName) === false) {
-      failureMsg = 'User is not part of any owner team'
-    }
+
+    const buildCommentInfoFn = this.#buildCommentInfo.bind(this, false, pullRequest, migrationMeta)
 
     if (failureMsg) {
       core.setFailed(failureMsg)
-      await this.#addCommentWithFileListing(pullRequest, commentBuilderFn('failed', failureMsg), [], migrationMeta)
+      await buildCommentInfoFn({
+        migrationRunListResponse: { executionResponseList: [], migrationAvailable: false, errMsg: failureMsg }
+      })
       return null
     }
 
-    const migrationRunListResponse = await runMigrationFromList(migrationConfigList, false)
+    const lintResponseList = await migration.runLintFromList(
+      migrationConfigList,
+      this.#getLintErrorCodesThatCanBeSkipped(pullRequest.labels),
+      this.#config.lintCodePrefixes
+    )
+
+    if (lintResponseList.errMsg && lintResponseList.canSkipAllErrors === false) {
+      core.setFailed(lintResponseList.errMsg)
+      await buildCommentInfoFn({
+        lintResponseList,
+        jiraIssue,
+        migrationRunListResponse: { migrationAvailable: false, executionResponseList: [] }
+      })
+      return {
+        ignore: true,
+        executionResponseList: [],
+        migrationAvailable: false,
+        lintResponseList
+      }
+    }
+
+    const migrationRunListResponse = await migration.runMigrationFromList(migrationConfigList, false)
 
     const result: RunMigrationResult = {
+      lintResponseList,
       executionResponseList: migrationRunListResponse.executionResponseList,
       migrationAvailable: migrationRunListResponse.migrationAvailable,
       ignore: false
     }
 
-    if (migrationRunListResponse.errMsg !== null) {
+    if (migrationRunListResponse.errMsg) {
       result.ignore = true
-      await this.#addCommentWithFileListing(
-        pullRequest,
-        commentBuilderFn('failed', migrationRunListResponse.errMsg),
-        migrationRunListResponse.executionResponseList,
-        migrationMeta
-      )
+      await buildCommentInfoFn({ migrationRunListResponse })
       core.setFailed(migrationRunListResponse.errMsg)
     } else if (migrationRunListResponse.migrationAvailable === false) {
       result.ignore = true
+      migrationRunListResponse.errMsg = NO_MIGRATION_AVAILABLE
       if (pullRequest.labels.some(label => label.name === this.#config.prLabel)) {
-        await this.#addCommentWithFileListing(
-          pullRequest,
-          commentBuilderFn('failed', 'No migrations available'),
-          migrationRunListResponse.executionResponseList,
-          migrationMeta
-        )
-        core.debug('No migrations available')
+        await buildCommentInfoFn({ migrationRunListResponse })
+        core.error(NO_MIGRATION_AVAILABLE)
       }
     }
 
@@ -278,14 +234,9 @@ export default class MigrationService {
       successMsg = `${migrationMeta.triggeredBy.login} approved the PR. Migrations ran successfully.`
     }
 
-    console.log('Ran Successfully: ', successMsg)
+    core.info(`Ran Successfully: ${successMsg}`)
 
-    await this.#addCommentWithFileListing(
-      pullRequest,
-      commentBuilderFn('successful', successMsg),
-      migrationRunListResponse.executionResponseList,
-      migrationMeta
-    )
+    await buildCommentInfoFn({ migrationRunListResponse })
 
     return result
   }
@@ -294,20 +245,52 @@ export default class MigrationService {
     if (this.#config.approvalTeams.length === 0) {
       return await Promise.resolve([])
     }
-    return await this.#client.getPullRequestApprovedUserList(prNumber)
+    return await this.#ghClient.getPullRequestApprovedUserList(prNumber)
   }
 
-  async #runMigrationForDryRun(pr: gha.PullRequest, migrationMeta: MigrationMeta): Promise<RunMigrationResult> {
+  #getLintErrorCodesThatCanBeSkipped(labels: gha.Label[]): string[] {
+    return labels
+      .filter(label => label.name.startsWith(this.#config.lintSkipErrorLabelPrefix))
+      .map(label => label.name.split(this.#config.lintSkipErrorLabelPrefix)[1])
+      .filter(Boolean)
+  }
+
+  async #runMigrationForDryRun(
+    pr: gha.PullRequest,
+    migrationMeta: MigrationMeta,
+    migrationConfigList?: MigrationConfig[]
+  ): Promise<RunMigrationResult> {
     core.info(`fn:runMigrationForDryRun PR#${pr.number}, Dry Run: true, Source=${migrationMeta.source}`)
 
-    const migrationConfigList = await buildMigrationConfigList(
-      this.#config.baseDirectory,
-      this.#config.databases,
-      await this.#aws.getSecrets(this.#config.dbSecretNameList)
-    )
-    const migrationRunListResponse = await runMigrationFromList(migrationConfigList, true)
+    if (migrationConfigList) {
+      await migration.hydrateMigrationConfigList(
+        migrationConfigList,
+        this.#config.databases,
+        await this.#secretClient.getSecrets(this.#config.dbSecretNameList)
+      )
+    } else {
+      migrationConfigList = await migration.buildMigrationConfigList(
+        this.#config.baseDirectory,
+        this.#config.databases,
+        this.#config.devDBUrl,
+        await this.#secretClient.getSecrets(this.#config.dbSecretNameList)
+      )
+    }
+
+    let lintResponseList: MigrationLintResponse | undefined
+    if (migrationMeta.lintRequired) {
+      lintResponseList = await migration.runLintFromList(
+        migrationConfigList,
+        // codes like: ['PG103', 'BC102', 'DS103']
+        this.#getLintErrorCodesThatCanBeSkipped(pr.labels),
+        this.#config.lintCodePrefixes
+      )
+    }
+
+    const migrationRunListResponse = await migration.runMigrationFromList(migrationConfigList, true)
 
     if (
+      !migrationRunListResponse.errMsg &&
       migrationRunListResponse.migrationAvailable === false &&
       migrationMeta.skipCommentWhenNoMigrationsAvailable === true
     ) {
@@ -318,16 +301,22 @@ export default class MigrationService {
       }
     }
 
-    await this.#handleDryRunResponse(
-      pr,
+    if (lintResponseList?.errMsg && lintResponseList.canSkipAllErrors === false) {
+      core.setFailed(lintResponseList.errMsg)
+    } else if (migrationRunListResponse.errMsg) {
+      core.setFailed(migrationRunListResponse.errMsg)
+    }
+
+    const { jiraIssue } = await this.#buildCommentInfo(true, pr, migrationMeta, {
       migrationRunListResponse,
-      commentBuilder('[DryRun] Migrations', pr.base.repo.html_url, false),
-      migrationMeta
-    )
+      lintResponseList,
+      addMigrationRunResponseForLint: true
+    })
 
     return {
       executionResponseList: migrationRunListResponse.executionResponseList,
       migrationAvailable: migrationRunListResponse.migrationAvailable,
+      jiraIssue,
       ignore: true
     }
   }
@@ -339,7 +328,7 @@ export default class MigrationService {
    */
   async #processPullRequestReview(event: gha.ContextPullRequestReview): Promise<RunMigrationResult> {
     if (!this.#hasLabel(event.payload.pull_request.labels, this.#config.prLabel)) {
-      this.#skipProcessingHandler(`${event.eventName}, reason=label missing`, event.payload)
+      this.skipProcessingHandler(`${event.eventName}, reason=label missing`, event.payload)
       return {
         executionResponseList: [],
         migrationAvailable: false,
@@ -356,9 +345,59 @@ export default class MigrationService {
     })
 
     if (result.migrationAvailable) {
-      // We can create JIRA ticket if required
-      await this.#ensureLabel(payload.pull_request.number, payload.pull_request.labels, this.#config.prLabel)
+      await this.#ensureLabels(payload.pull_request, result.jiraIssue)
     }
+    return result
+  }
+
+  /**
+   * Add label if not present
+   *
+   * @param {gha.ContextPullRequest} event
+   */
+  async #processPullRequest(event: gha.ContextPullRequest): Promise<RunMigrationResult> {
+    const { payload } = event
+    const pr = payload.pull_request
+    const migrationMeta: MigrationMeta = {
+      eventName: event.eventName,
+      actionName: payload.action,
+      source: 'pr',
+      triggeredBy: pr.user,
+      ensureJiraTicket: true,
+      lintRequired: true
+    }
+    const migrationConfigList = await migration.buildMigrationConfigList(
+      this.#config.baseDirectory,
+      this.#config.databases,
+      this.#config.devDBUrl,
+      {},
+      false
+    )
+
+    const validationResult = validators.validateChangedFiles(
+      migrationConfigList,
+      await this.#ghClient.getChangedFiles(pr.number),
+      this.#config.configFileName
+    )
+    if (validationResult) {
+      if (validationResult.migrationAvailable) {
+        core.setFailed(validationResult.errMsg)
+        await this.#processChangedFileValidationError(validationResult, pr, migrationMeta)
+      }
+      return {
+        executionResponseList: [],
+        migrationAvailable: validationResult.migrationAvailable,
+        ignore: true
+      }
+    }
+
+    // validate files
+    const result = await this.#runMigrationForDryRun(pr, migrationMeta, migrationConfigList)
+
+    if (result.migrationAvailable) {
+      await this.#ensureLabels(pr, result.jiraIssue)
+    }
+
     return result
   }
 
@@ -371,59 +410,67 @@ export default class MigrationService {
       source: 'comment',
       triggeredBy: event.payload.sender,
       commentId: event.payload.comment.id,
+      lintRequired: true,
       commentBody: event.payload.comment.body
     }
+
     let result: RunMigrationResult | null = null
-    if (commentBody === 'db migrate dry-run') {
+    if (commentBody === CMD_DRY_RUN) {
       result = await this.#runMigrationForDryRun(event.payload.issue, migrationMeta)
-    } else if (commentBody === 'db migrate') {
+    } else if (commentBody === CMD_APPLY) {
       result = await this.#runMigrationsForExecution(event.payload.issue, migrationMeta)
+    } else if (commentBody === CMD_DRY_RUN_JIRA) {
+      migrationMeta.ensureJiraTicket = true
+      result = await this.#runMigrationForDryRun(event.payload.issue, migrationMeta)
     }
 
     if (result?.migrationAvailable) {
-      // We can create JIRA ticket if required
-      await this.#ensureLabel(event.payload.issue.number, event.payload.issue.labels, this.#config.prLabel)
+      await this.#ensureLabels(event.payload.issue, result.jiraIssue)
     }
     return result
   }
 
-  #skipProcessingHandler(eventName: string, payload: { action: string }): void {
+  skipProcessingHandler(eventName: string, payload: { action: string }): void {
     core.info(`Invalid event: event=${eventName} action=${payload.action}`)
   }
 
-  async processEvent(event: gha.Context): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async processEvent(event: gha.Context): Promise<any> {
     const { payload, eventName } = event
 
     core.setOutput('event_type', `${eventName}:${payload.action}`)
 
-    const errMsg = this.#validatePullRequest('pull_request' in payload ? payload.pull_request : payload.issue)
+    const errMsg = validators.validatePullRequest(
+      'pull_request' in payload ? payload.pull_request : payload.issue,
+      this.#config.baseBranch
+    )
     if (errMsg) {
-      console.info(errMsg)
+      core.debug(errMsg)
       return
     }
 
     if (eventName === 'pull_request_review') {
       if (payload.action !== 'submitted') {
-        return this.#skipProcessingHandler(eventName, payload)
+        return this.skipProcessingHandler(eventName, payload)
       }
-      await this.#processPullRequestReview(event)
+      return await this.#processPullRequestReview(event)
     } else if (eventName === 'issue_comment') {
       if (payload.action !== 'created') {
-        return this.#skipProcessingHandler(eventName, payload)
+        return this.skipProcessingHandler(eventName, payload)
       }
-      await this.#processPullRequestComment(event)
+      return await this.#processPullRequestComment(event)
     } else if (eventName === 'pull_request') {
       if (payload.action !== 'opened' && payload.action !== 'reopened' && payload.action !== 'synchronize') {
-        return this.#skipProcessingHandler(eventName, payload)
+        return this.skipProcessingHandler(eventName, payload)
       }
-      await this.#processPullRequest(event)
+      return await this.#processPullRequest(event)
     } else {
-      return this.#skipProcessingHandler(eventName, payload)
+      return this.skipProcessingHandler(eventName, payload)
     }
   }
 
   async mapIssueToPullRequest(issue: gha.PullRequest): Promise<void> {
-    const { pullRequest, defaultBranchRef } = await this.#client.getPRInformation(issue.number)
+    const { pullRequest, defaultBranchRef } = await this.#ghClient.getPRInformation(issue.number)
 
     issue.base = {
       ref: pullRequest.baseRef.name,
