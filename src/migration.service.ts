@@ -68,7 +68,9 @@ export default class MigrationService {
     pr: gha.PullRequest,
     migrationMeta: MigrationMeta
   ): Promise<void> {
-    await this.#buildCommentInfo(true, pr, migrationMeta, {
+    await this.#buildCommentInfo(true, {
+      pr,
+      migrationMeta,
       migrationRunListResponse: { migrationAvailable: false, executionResponseList: [] },
       changedFileValidation: validationErr,
       closePR: true
@@ -117,20 +119,8 @@ export default class MigrationService {
     return result
   }
 
-  async #buildCommentInfo(
-    dryRun: boolean,
-    pullRequest: gha.PullRequest,
-    migrationMeta: MigrationMeta,
-    params: NotifyParams
-  ): Promise<NotifyResponse> {
-    const notifier = this.#factory.getNotifier(
-      dryRun,
-      pullRequest,
-      migrationMeta,
-      this.#config,
-      this.#ghClient,
-      this.#jiraClient
-    )
+  async #buildCommentInfo(dryRun: boolean, params: NotifyParams): Promise<NotifyResponse> {
+    const notifier = this.#factory.getNotifier(dryRun, this.#config, this.#ghClient, this.#jiraClient)
     return await notifier.notify(params)
   }
 
@@ -171,11 +161,13 @@ export default class MigrationService {
       )
     }
 
-    const buildCommentInfoFn = this.#buildCommentInfo.bind(this, false, pullRequest, migrationMeta)
+    const buildCommentInfoFn = this.#buildCommentInfo.bind(this, false)
 
     if (failureMsg) {
       core.setFailed(failureMsg)
       await buildCommentInfoFn({
+        pr: pullRequest,
+        migrationMeta,
         migrationRunListResponse: { executionResponseList: [], migrationAvailable: false, errMsg: failureMsg }
       })
       return null
@@ -190,6 +182,8 @@ export default class MigrationService {
     if (lintResponseList.errMsg && lintResponseList.canSkipAllErrors === false) {
       core.setFailed(lintResponseList.errMsg)
       await buildCommentInfoFn({
+        pr: pullRequest,
+        migrationMeta,
         lintResponseList,
         jiraIssue,
         migrationRunListResponse: { migrationAvailable: false, executionResponseList: [] }
@@ -213,13 +207,13 @@ export default class MigrationService {
 
     if (migrationRunListResponse.errMsg) {
       result.ignore = true
-      await buildCommentInfoFn({ migrationRunListResponse })
+      await buildCommentInfoFn({ pr: pullRequest, migrationMeta, migrationRunListResponse })
       core.setFailed(migrationRunListResponse.errMsg)
     } else if (migrationRunListResponse.migrationAvailable === false) {
       result.ignore = true
       migrationRunListResponse.errMsg = NO_MIGRATION_AVAILABLE
       if (pullRequest.labels.some(label => label.name === this.#config.prLabel)) {
-        await buildCommentInfoFn({ migrationRunListResponse })
+        await buildCommentInfoFn({ pr: pullRequest, migrationMeta, migrationRunListResponse })
         core.error(NO_MIGRATION_AVAILABLE)
       }
     }
@@ -236,7 +230,7 @@ export default class MigrationService {
 
     core.info(`Ran Successfully: ${successMsg}`)
 
-    await buildCommentInfoFn({ migrationRunListResponse })
+    await buildCommentInfoFn({ pr: pullRequest, migrationMeta, migrationRunListResponse })
 
     return result
   }
@@ -307,7 +301,9 @@ export default class MigrationService {
       core.setFailed(migrationRunListResponse.errMsg)
     }
 
-    const { jiraIssue } = await this.#buildCommentInfo(true, pr, migrationMeta, {
+    const { jiraIssue } = await this.#buildCommentInfo(true, {
+      pr,
+      migrationMeta,
       migrationRunListResponse,
       lintResponseList,
       addMigrationRunResponseForLint: true
@@ -435,7 +431,7 @@ export default class MigrationService {
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  async processEvent(event: gha.Context): Promise<any> {
+  async processEvent(event: Exclude<gha.Context, gha.ContextSchedule>): Promise<any> {
     const { payload, eventName } = event
 
     core.setOutput('event_type', `${eventName}:${payload.action}`)
@@ -466,6 +462,42 @@ export default class MigrationService {
       return await this.#processPullRequest(event)
     } else {
       return this.skipProcessingHandler(eventName, payload)
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async processDrift(event: gha.ContextSchedule): Promise<any> {
+    const { payload, eventName } = event
+    if (eventName !== 'schedule') {
+      return this.skipProcessingHandler(eventName, { action: payload.action || 'na' })
+    }
+
+    const secretMap = await this.#secretClient.getSecrets(this.#config.dbSecretNameList)
+    const migrationConfigList = await migration.buildMigrationConfigList(
+      this.#config.baseDirectory,
+      this.#config.databases,
+      this.#config.devDBUrl,
+      secretMap
+    )
+    const driftRunListResponse = await migration.runSchemaDriftFromList(migrationConfigList)
+
+    // No unexpected error and no drift, return early. No need to call JIRA
+    if (!driftRunListResponse.errMsg && driftRunListResponse.hasSchemaDrifts === false) {
+      return Promise.resolve({ driftRunListResponse })
+    }
+
+    const jiraIssue = await (this.#jiraClient?.findSchemaDriftIssue(
+      this.#config.serviceName,
+      this.#config.jira?.doneValue || ''
+    ) ?? Promise.resolve(undefined))
+
+    const notifier = this.#factory.getNotifier(false, this.#config, this.#ghClient, null)
+
+    const driftResponse = await notifier.drift({ driftRunListResponse, jiraIssue })
+
+    return {
+      driftRunListResponse,
+      ...driftResponse
     }
   }
 

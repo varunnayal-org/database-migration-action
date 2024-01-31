@@ -3,13 +3,14 @@
 import * as core from '@actions/core'
 import { VaultClient } from '../src/client/vault/types'
 import { GHClient, PullRequest } from '../src/types.gha'
-import { JiraClient, JiraIssue } from '../src/types.jira'
+import { JiraClient, JiraIssue, Config as JIRAConfig } from '../src/types.jira'
 import { Builder, Config, MigrationLintResponse, MigrationMeta, Notifier, NotifyResponse } from '../src/types'
 import MigrationService from '../src/migration.service'
 import { LINT_CODE_DEFAULT_PREFIXES } from '../src/constants'
 import * as c from './common'
 import * as migration from '../src/migration/migration'
 import {
+  AtlasDriftResponse,
   AtlasLintResponse,
   AtlasMigrationExecutionResponse,
   AtlasVersionExecution,
@@ -44,13 +45,15 @@ function buildJira(): JiraClient {
   return {
     addComment: jest.fn().mockRejectedValue('Method addComment should not have been called'),
     findIssue: jest.fn().mockRejectedValue('Method findIssue should not have been called'),
+    findSchemaDriftIssue: jest.fn().mockRejectedValue('Method findSchemaDriftIssue should not have been called'),
     createIssue: jest.fn().mockRejectedValue('Method createIssue should not have been called')
   }
 }
 
 function buildNotifier(): Notifier {
   return {
-    notify: jest.fn().mockRejectedValue('Method notify should not have been called')
+    notify: jest.fn().mockRejectedValue('Method notify should not have been called'),
+    drift: jest.fn().mockRejectedValue('Method drift should not have been called')
   }
 }
 
@@ -61,7 +64,8 @@ jest.mock('../src/migration/migration', () => {
     hydrateMigrationConfigList: jest.fn(),
     buildMigrationConfigList: jest.fn(),
     runMigrationFromList: jest.fn(),
-    runLintFromList: jest.fn()
+    runLintFromList: jest.fn(),
+    runSchemaDriftFromList: jest.fn()
   }
 })
 
@@ -84,14 +88,31 @@ describe('migration service', () => {
   ): Builder {
     return {
       getVault: jest.fn().mockReturnValue(v || vaultClient),
-      getJira: jest.fn().mockReturnValue(j || jiraClient),
+      getJira: jest.fn().mockImplementation((jiraConfig: JIRAConfig) => {
+        if (!jiraConfig) {
+          return null
+        }
+        return j || jiraClient
+      }),
       getGithub: jest.fn().mockReturnValue(g || ghClient),
       getNotifier: jest.fn().mockReturnValue(n || notifier)
     }
   }
 
-  function getSvc(): MigrationService {
-    return new MigrationService(config, factory)
+  function getSvc(
+    {
+      jiraConfig
+    }: {
+      jiraConfig: undefined | null // null for ignoring jira integration
+    } = { jiraConfig: undefined }
+  ): MigrationService {
+    const usedConfig = {
+      ...config
+    }
+    if (jiraConfig === null) {
+      usedConfig.jira = undefined
+    }
+    return new MigrationService(usedConfig, factory)
   }
 
   const mockM = (fn: string, value: any): void => {
@@ -161,6 +182,8 @@ describe('migration service', () => {
         project: 'CALC',
         issueType: 'Task',
         label: 'db-migration',
+        schemaDriftLabel: 'db-schema-drift',
+        schemaDriftIssueType: 'Bug',
         fields: {
           pr: 'customfield_1',
           prLabel: 'GithHub PR Link',
@@ -216,74 +239,614 @@ describe('migration service', () => {
     expect(pr.base).toEqual(expectedBase)
   })
 
-  describe('sample flow', () => {
-    beforeEach(() => {
-      mockM('buildMigrationConfigList', c.getMigrationConfigList())
+  describe('processEvent', () => {
+    describe('sample flow', () => {
+      beforeEach(() => {
+        mockM('buildMigrationConfigList', c.getMigrationConfigList())
 
-      ghClient.getChangedFiles = jest
-        .fn()
-        .mockResolvedValue(Object.keys(c.getMockDirectories().migrations).map(f => `migrations/${f}`))
+        ghClient.getChangedFiles = jest
+          .fn()
+          .mockResolvedValue(Object.keys(c.getMockDirectories().migrations).map(f => `migrations/${f}`))
+      })
+
+      function buildMVER(versionExecutionList?: VersionExecution[]): AtlasVersionExecution[] {
+        return (versionExecutionList || []).map(executionList =>
+          AtlasVersionExecution.fromVersionExecution(executionList)
+        )
+      }
+
+      function validateResponse(
+        response: any,
+        migrationMeta: MigrationMeta,
+        pr = getPR(),
+        addLint: boolean | MigrationLintResponse = false,
+        jiraIssue: JiraIssue | undefined = undefined
+      ): void {
+        const expectedExecutionResponseList = [
+          {
+            containsMigrations: true,
+            migrations: buildMVER(c.artifacts.no_lint_error.versionExecution?.mg1)
+          }
+        ]
+        expect(response).toEqual({
+          executionResponseList: expectedExecutionResponseList,
+          migrationAvailable: true,
+          jiraIssue: jiraIssue || getJiraIssue(),
+          ignore: true
+        })
+
+        // Notified thus creating Github comment and JIRA issue
+        expect(factory.getNotifier).toHaveBeenCalledTimes(1)
+        expect(factory.getNotifier).toHaveBeenCalledWith(true, config, ghClient, jiraClient)
+        expect(notifier.notify).toHaveBeenCalledTimes(1)
+        expect(notifier.notify).toHaveBeenCalledWith({
+          pr,
+          migrationMeta,
+          migrationRunListResponse: {
+            migrationAvailable: true,
+            executionResponseList: expectedExecutionResponseList
+          },
+          addMigrationRunResponseForLint: true,
+
+          ...(addLint === false
+            ? {}
+            : addLint === true
+              ? {
+                  lintResponseList: {
+                    lintResponseList: [
+                      {
+                        fileLintResults: [],
+                        migrationDir: 'mg1',
+                        allSkipped: false,
+                        firstError:
+                          '"[{\\"Name\\":\\"00000000000000_baseline.sql\\",\\"Text\\":\\"CREATE EXTENSION IF NOT EXISTS \\\\\\"uuid-ossp\\\\\\";\\"},{\\"Name\\":\\"20231222064834_step1.sql\\",\\"Text\\":\\"CREATE TABLE\\\\n  users (id int primary key, nAme1 varchar(100), age int, email varchar(100));\\\\n\\"},{\\"Name\\":\\"20231222064941_step3.sql\\",\\"Text\\":\\"--atlas:txmode none\\\\n\\\\ncreate index concurrently idx_users_email on users(email);\\\\n\\\\ncreate index concurrently idx_users_age on users(age);\\"},{\\"Name\\":\\"20231222120857_step4.sql\\",\\"Text\\":\\"-- atlas:txmode none\\\\n\\\\nCREATE TABLE\\\\n  sessions (\\\\n    id int primary key,\\\\n    user_id int not null,\\\\n    data text not null,\\\\n    created_at timestamptz not null default now ()\\\\n  );\\\\n\\\\n-- works because table is created in this version\\\\ncreate index idx_sessions_user_id on sessions(user_id);\\\\n\\\\n\\"}]"'
+                      }
+                    ],
+                    canSkipAllErrors: false
+                  }
+                }
+              : { lintResponseList: addLint })
+        })
+      }
+
+      it('should create jira issue and github comment when pr is created', async () => {
+        const svc = getSvc()
+
+        mockM('runMigrationFromList', {
+          migrationAvailable: true,
+          executionResponseList: [
+            AtlasMigrationExecutionResponse.build(JSON.stringify(c.artifacts.no_lint_error.versionExecution?.mg1))
+          ]
+        })
+        mockM('runLintFromList', {
+          lintResponseList: [
+            AtlasLintResponse.build(
+              JSON.stringify(c.artifacts.no_lint_error.lintResponseOutput.mg1),
+              'mg1',
+              [],
+              LINT_CODE_DEFAULT_PREFIXES
+            )
+          ],
+          canSkipAllErrors: false
+        })
+
+        notifier.notify = jest.fn().mockResolvedValue({
+          githubComment: {},
+          jiraComment: {},
+          jiraIssue: getJiraIssue()
+        } as NotifyResponse)
+        ghClient.addLabel = jest.fn()
+
+        const response = await svc.processEvent(
+          c.getPRContext({
+            action: 'opened',
+            after: 'xxxxx',
+            before: 'aaaaaa',
+            number: 1,
+            organization: {
+              login: 'my-org'
+            },
+            pull_request: getPR(),
+            repository: c.getRepo(),
+            sender: c.user('user-aaa')
+          })
+        )
+
+        validateResponse(
+          response,
+          {
+            eventName: 'pull_request',
+            actionName: 'opened',
+            source: 'pr',
+            triggeredBy: c.user('user-aaa'),
+            ensureJiraTicket: true,
+            lintRequired: true
+          },
+          getPR(),
+          true
+        )
+
+        // Label added to PR
+        expect(ghClient.addLabel).toHaveBeenCalledTimes(1)
+        expect(ghClient.addLabel).toHaveBeenCalledWith(1, ['jira-ticket-created'])
+      })
+
+      // eslint-disable-next-line jest/expect-expect
+      it('should ensure jira ticket when commented', async () => {
+        mockM('runMigrationFromList', {
+          migrationAvailable: true,
+          executionResponseList: [
+            AtlasMigrationExecutionResponse.build(JSON.stringify(c.artifacts.no_lint_error.versionExecution?.mg1))
+          ]
+        })
+        mockM('runLintFromList', {
+          lintResponseList: [
+            AtlasLintResponse.build(
+              JSON.stringify(c.artifacts.no_lint_error.lintResponseOutput.mg1),
+              'mg1',
+              [],
+              LINT_CODE_DEFAULT_PREFIXES
+            )
+          ],
+          canSkipAllErrors: false
+        })
+        notifier.notify = jest.fn().mockResolvedValue({
+          githubComment: {},
+          jiraComment: {},
+          jiraIssue: getJiraIssue()
+        } as NotifyResponse)
+        ghClient.addLabel = jest.fn()
+
+        const svc = getSvc()
+
+        const response = await svc.processEvent(
+          c.getPRCommentContext({
+            action: 'created',
+            comment: c.getComment(212121, 'jira', 'user-ddd'),
+            issue: getPR(['jira-ticket-created']),
+            organization: {
+              login: 'my-org'
+            },
+            repository: c.getRepo(),
+            sender: c.user('user-aaa')
+          })
+        )
+
+        validateResponse(
+          response,
+          {
+            eventName: 'issue_comment',
+            actionName: 'created',
+            source: 'comment',
+            triggeredBy: {
+              login: 'user-aaa',
+              type: 'User'
+            },
+            commentId: 212121,
+            commentBody: 'db migrate jira',
+            lintRequired: true,
+            ensureJiraTicket: true
+          },
+          getPR(['jira-ticket-created']),
+          true
+        )
+
+        // Label added to PR
+        expect(ghClient.addLabel).toHaveBeenCalledTimes(1)
+        expect(ghClient.addLabel).toHaveBeenCalledWith(1, ['db-migration'])
+      })
+
+      it('should not execute migration when pr is not approved in github from a user of approvalTeams', async () => {
+        // pr not approved by anyone
+        ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ccc'])
+        vaultClient.getSecrets = jest.fn().mockResolvedValue({
+          CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
+        })
+        notifier.notify = jest.fn()
+
+        // JIRA ticket is approved
+        jiraClient.findIssue = jest.fn().mockResolvedValue(getApprovedJiraIssue())
+        const svc = getSvc()
+        const response = await svc.processEvent(
+          c.getPRCommentContext({
+            action: 'created',
+            comment: c.getComment(212121, '', 'user-ddd'),
+            issue: getPR(['jira-ticket-created', 'db-migration']),
+            organization: {
+              login: 'my-org'
+            },
+            repository: c.getRepo(),
+            sender: c.user('user-aaa')
+          })
+        )
+
+        const expectedErrMsg = 'PR is not approved by @my-org/dba'
+
+        expect(response).toEqual(null)
+        expect(factory.getNotifier).toHaveBeenCalledTimes(1)
+        expect(factory.getNotifier).toHaveBeenCalledWith(false, config, ghClient, jiraClient)
+        expect(notifier.notify).toHaveBeenCalledTimes(1)
+        expect(notifier.notify).toHaveBeenCalledWith({
+          pr: getPR(['jira-ticket-created', 'db-migration']),
+          migrationMeta: {
+            eventName: 'issue_comment',
+            actionName: 'created',
+            source: 'comment',
+            triggeredBy: c.user('user-aaa'),
+            commentId: 212121,
+            commentBody: 'db migrate',
+            lintRequired: true
+          },
+          migrationRunListResponse: {
+            executionResponseList: [],
+            migrationAvailable: false,
+            errMsg: expectedErrMsg
+          }
+        })
+        expect(coreSetFailed).toHaveBeenCalledWith(expectedErrMsg)
+      })
+
+      it('should approve the pr', async () => {
+        const svc = getSvc()
+
+        mockM('runMigrationFromList', {
+          migrationAvailable: true,
+          executionResponseList: [
+            AtlasMigrationExecutionResponse.build(JSON.stringify(c.artifacts.no_lint_error.versionExecution?.mg1))
+          ]
+        })
+        notifier.notify = jest.fn().mockResolvedValue({
+          githubComment: {},
+          jiraComment: {},
+          jiraIssue: getJiraIssue()
+        } as NotifyResponse)
+        ghClient.addLabel = jest.fn()
+
+        const response = await svc.processEvent(
+          c.getPRReviewContext({
+            action: 'submitted',
+            organization: {
+              login: 'my-org'
+            },
+            pull_request: getPR(['jira-ticket-created', 'db-migration']),
+            repository: c.getRepo(),
+            review: c.getReview('user-aaa', 1111111),
+            sender: {
+              login: 'user-bbb',
+              type: 'User'
+            }
+          })
+        )
+
+        validateResponse(
+          response,
+          {
+            eventName: 'pull_request_review',
+            actionName: 'submitted',
+            skipCommentWhenNoMigrationsAvailable: true,
+            source: 'review',
+            triggeredBy: {
+              login: 'user-bbb',
+              type: 'User'
+            }
+          },
+          getPR(['jira-ticket-created', 'db-migration']),
+          false,
+          getJiraIssue()
+        )
+
+        expect(ghClient.addLabel).toHaveBeenCalledTimes(0)
+      })
+
+      it('should execute the migration', async () => {
+        // pr not approved by approvalTeams
+        ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ddd'])
+        vaultClient.getSecrets = jest.fn().mockResolvedValue({
+          CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
+        })
+        // JIRA ticket is approved
+        jiraClient.findIssue = jest.fn().mockResolvedValue(getApprovedJiraIssue())
+        mockM('runMigrationFromList', {
+          migrationAvailable: true,
+          executionResponseList: [
+            AtlasMigrationExecutionResponse.build(JSON.stringify(c.artifacts.no_lint_error.versionExecution?.mg1))
+          ]
+        })
+        mockM('runLintFromList', {
+          lintResponseList: [
+            AtlasLintResponse.build(
+              c.artifacts.no_lint_error.lintResponseOutput.mg1,
+              'mg1',
+              [],
+              LINT_CODE_DEFAULT_PREFIXES
+            )
+          ],
+          canSkipAllErrors: false
+        })
+        notifier.notify = jest.fn()
+
+        const svc = getSvc()
+        const response = await svc.processEvent(
+          c.getPRCommentContext({
+            action: 'created',
+            comment: c.getComment(212121, '', 'user-ddd'),
+            issue: getPR(['jira-ticket-created', 'db-migration']),
+            organization: {
+              login: 'my-org'
+            },
+            repository: c.getRepo(),
+            sender: c.user('user-aaa')
+          })
+        )
+
+        const expectedExecutionResponseList = [
+          {
+            containsMigrations: true,
+            migrations: buildMVER(c.artifacts.no_lint_error.versionExecution?.mg1)
+          }
+        ]
+
+        const expectedResponse = {
+          lintResponseList: {
+            lintResponseList: [
+              {
+                fileLintResults: [],
+                migrationDir: 'mg1',
+                allSkipped: true
+              }
+            ],
+            canSkipAllErrors: false
+          },
+          executionResponseList: expectedExecutionResponseList,
+          migrationAvailable: true,
+          ignore: false
+        }
+
+        expect(response).toEqual(expectedResponse)
+        // Notified thus creating Github comment and JIRA issue
+        expect(factory.getNotifier).toHaveBeenCalledTimes(1)
+        expect(factory.getNotifier).toHaveBeenCalledWith(false, config, ghClient, jiraClient)
+        expect(notifier.notify).toHaveBeenCalledTimes(1)
+        expect(notifier.notify).toHaveBeenCalledWith({
+          pr: getPR(['jira-ticket-created', 'db-migration']),
+          migrationMeta: {
+            eventName: 'issue_comment',
+            actionName: 'created',
+            source: 'comment',
+            triggeredBy: { login: 'user-aaa', type: 'User' },
+            commentId: 212121,
+            commentBody: 'db migrate',
+            lintRequired: true
+          },
+          migrationRunListResponse: {
+            migrationAvailable: true,
+            executionResponseList: expectedExecutionResponseList
+          }
+        })
+      })
+
+      it('should error out while execute the migration on linting errors', async () => {
+        // pr not approved by approvalTeams
+        ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ddd'])
+        vaultClient.getSecrets = jest.fn().mockResolvedValue({
+          CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
+        })
+        // JIRA ticket is approved
+        jiraClient.findIssue = jest.fn().mockResolvedValue(getApprovedJiraIssue())
+        mockM('runLintFromList', {
+          lintResponseList: [
+            AtlasLintResponse.build(
+              JSON.stringify(c.artifacts.sql_file_error_lint_skipped.lintResponseOutput.mg1),
+              'mg1',
+              [],
+              LINT_CODE_DEFAULT_PREFIXES
+            )
+          ],
+          errMsg: 'some error encountered',
+          canSkipAllErrors: false
+        })
+        notifier.notify = jest.fn()
+
+        const svc = getSvc()
+        const response = await svc.processEvent(
+          c.getPRCommentContext({
+            action: 'created',
+            comment: c.getComment(212121, '', 'user-ddd'),
+            issue: getPR(['jira-ticket-created', 'db-migration']),
+            organization: {
+              login: 'my-org'
+            },
+            repository: c.getRepo(),
+            sender: c.user('user-aaa')
+          })
+        )
+
+        const expectedLintResponse = {
+          lintResponseList: [
+            {
+              fileLintResults: [],
+              migrationDir: 'mg1',
+              allSkipped: false,
+              firstError:
+                '"[{\\"Name\\":\\"20231222064941_step3.sql\\",\\"Error\\":\\"executing statement: pq: column \\\\\\"email\\\\\\" does not exist\\"}]"'
+            }
+          ],
+          errMsg: 'some error encountered',
+          canSkipAllErrors: false
+        }
+
+        expect(response).toEqual({
+          lintResponseList: expectedLintResponse,
+          executionResponseList: [],
+          migrationAvailable: false,
+          ignore: true
+        })
+
+        // Notified thus creating Github comment and JIRA issue
+        expect(factory.getNotifier).toHaveBeenCalledTimes(1)
+        expect(factory.getNotifier).toHaveBeenCalledWith(false, config, ghClient, jiraClient)
+        expect(notifier.notify).toHaveBeenCalledTimes(1)
+        expect(notifier.notify).toHaveBeenCalledWith({
+          pr: getPR(['jira-ticket-created', 'db-migration']),
+          migrationMeta: {
+            eventName: 'issue_comment',
+            actionName: 'created',
+            source: 'comment',
+            triggeredBy: { login: 'user-aaa', type: 'User' },
+            commentId: 212121,
+            commentBody: 'db migrate',
+            lintRequired: true
+          },
+          migrationRunListResponse: {
+            migrationAvailable: false,
+            executionResponseList: []
+          },
+          jiraIssue: getApprovedJiraIssue(),
+          lintResponseList: {
+            lintResponseList: [
+              {
+                fileLintResults: [],
+                migrationDir: 'mg1',
+                allSkipped: false,
+                firstError:
+                  '"[{\\"Name\\":\\"20231222064941_step3.sql\\",\\"Error\\":\\"executing statement: pq: column \\\\\\"email\\\\\\" does not exist\\"}]"'
+              }
+            ],
+            errMsg: 'some error encountered',
+            canSkipAllErrors: false
+          }
+        })
+        expect(migration.runMigrationFromList).toHaveBeenCalledTimes(0)
+        expect(coreSetFailed).toHaveBeenCalledWith('some error encountered')
+      })
     })
 
-    function buildMVER(versionExecutionList?: VersionExecution[]): AtlasVersionExecution[] {
-      return (versionExecutionList || []).map(executionList =>
-        AtlasVersionExecution.fromVersionExecution(executionList)
-      )
-    }
+    it('should skip pr approval when pr has label missing', async () => {
+      const svc = getSvc()
 
-    function validateResponse(
-      response: any,
-      migrationMeta: MigrationMeta,
-      pr = getPR(),
-      addLint: boolean | MigrationLintResponse = false,
-      jiraIssue: JiraIssue | undefined = undefined
-    ): void {
+      const response = await svc.processEvent(
+        c.getPRReviewContext({
+          action: 'submitted',
+          organization: {
+            login: 'my-org'
+          },
+          pull_request: getPR(true),
+          repository: c.getRepo(),
+          review: c.getReview('user-aaa', 1111111),
+          sender: {
+            login: 'user-bbb',
+            type: 'User'
+          }
+        })
+      )
+
+      expect(response).toEqual({ executionResponseList: [], migrationAvailable: false, ignore: true })
+    })
+
+    it('should error while executing the migration', async () => {
+      const expectedErrMsg = 'some error'
+
+      // pr not approved by approvalTeams
+      ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ddd'])
+      vaultClient.getSecrets = jest.fn().mockResolvedValue({
+        CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
+      })
+      // JIRA ticket is approved
+      jiraClient.findIssue = jest.fn().mockResolvedValue(getApprovedJiraIssue())
+      mockM('runMigrationFromList', {
+        migrationAvailable: true,
+        executionResponseList: [AtlasMigrationExecutionResponse.fromError(expectedErrMsg)],
+        errMsg: expectedErrMsg
+      })
+      mockM('runLintFromList', { lintResponseList: [], canSkipAllErrors: false })
+      notifier.notify = jest.fn()
+
+      const svc = getSvc()
+      const response = await svc.processEvent(
+        c.getPRCommentContext({
+          action: 'created',
+          comment: c.getComment(212121, '', 'user-ddd'),
+          issue: getPR(),
+          organization: {
+            login: 'my-org'
+          },
+          repository: c.getRepo(),
+          sender: c.user('user-aaa')
+        })
+      )
+
       const expectedExecutionResponseList = [
         {
-          containsMigrations: true,
-          migrations: buildMVER(c.artifacts.no_lint_error.versionExecution?.mg1)
+          containsMigrations: false,
+          migrations: [],
+          firstError: expectedErrMsg
         }
       ]
-      expect(response).toEqual({
-        executionResponseList: expectedExecutionResponseList,
-        migrationAvailable: true,
-        jiraIssue: jiraIssue || getJiraIssue(),
-        ignore: true
-      })
 
+      const expectedResponse = {
+        lintResponseList: { lintResponseList: [], canSkipAllErrors: false },
+        executionResponseList: [{ containsMigrations: false, migrations: [], firstError: expectedErrMsg }],
+        migrationAvailable: true,
+        ignore: true
+      }
+
+      expect(response).toEqual(expectedResponse)
       // Notified thus creating Github comment and JIRA issue
       expect(factory.getNotifier).toHaveBeenCalledTimes(1)
-      expect(factory.getNotifier).toHaveBeenCalledWith(true, pr, migrationMeta, config, ghClient, jiraClient)
+      expect(factory.getNotifier).toHaveBeenCalledWith(false, config, ghClient, jiraClient)
       expect(notifier.notify).toHaveBeenCalledTimes(1)
       expect(notifier.notify).toHaveBeenCalledWith({
+        pr: getPR(),
+        migrationMeta: {
+          eventName: 'issue_comment',
+          actionName: 'created',
+          source: 'comment',
+          triggeredBy: { login: 'user-aaa', type: 'User' },
+          commentId: 212121,
+          commentBody: 'db migrate',
+          lintRequired: true
+        },
         migrationRunListResponse: {
           migrationAvailable: true,
-          executionResponseList: expectedExecutionResponseList
-        },
-        addMigrationRunResponseForLint: true,
-
-        ...(addLint === false
-          ? {}
-          : addLint === true
-            ? {
-                lintResponseList: {
-                  lintResponseList: [
-                    {
-                      fileLintResults: [],
-                      migrationDir: 'mg1',
-                      allSkipped: false,
-                      firstError:
-                        '"[{\\"Name\\":\\"00000000000000_baseline.sql\\",\\"Text\\":\\"CREATE EXTENSION IF NOT EXISTS \\\\\\"uuid-ossp\\\\\\";\\"},{\\"Name\\":\\"20231222064834_step1.sql\\",\\"Text\\":\\"CREATE TABLE\\\\n  users (id int primary key, nAme1 varchar(100), age int, email varchar(100));\\\\n\\"},{\\"Name\\":\\"20231222064941_step3.sql\\",\\"Text\\":\\"--atlas:txmode none\\\\n\\\\ncreate index concurrently idx_users_email on users(email);\\\\n\\\\ncreate index concurrently idx_users_age on users(age);\\"},{\\"Name\\":\\"20231222120857_step4.sql\\",\\"Text\\":\\"-- atlas:txmode none\\\\n\\\\nCREATE TABLE\\\\n  sessions (\\\\n    id int primary key,\\\\n    user_id int not null,\\\\n    data text not null,\\\\n    created_at timestamptz not null default now ()\\\\n  );\\\\n\\\\n-- works because table is created in this version\\\\ncreate index idx_sessions_user_id on sessions(user_id);\\\\n\\\\n\\"}]"'
-                    }
-                  ],
-                  canSkipAllErrors: false
-                }
-              }
-            : { lintResponseList: addLint })
+          executionResponseList: expectedExecutionResponseList,
+          errMsg: expectedErrMsg
+        }
       })
-    }
 
-    it('should create jira issue and github comment when pr is created', async () => {
+      expect(coreSetFailed).toHaveBeenCalledWith(expectedErrMsg)
+    })
+
+    // You add SQL files in PR. The label will be added to the PR
+    // after that when PR is removed, then the gha register the error(core.error method)
+
+    it('should return silently when sql files are removed from PR', async () => {
+      ghClient.getChangedFiles = jest.fn().mockResolvedValue([])
+
+      const svc = getSvc()
+      const response = await svc.processEvent(
+        c.getPRContext({
+          action: 'synchronize',
+          after: 'xxxxx',
+          before: 'aaaaaa',
+          number: 1,
+          organization: {
+            login: 'my-org'
+          },
+          pull_request: getPR(),
+          repository: c.getRepo(),
+          sender: c.user('user-aaa')
+        })
+      )
+
+      expect(response).toEqual({
+        executionResponseList: [],
+        migrationAvailable: false,
+        ignore: true
+      })
+      expect(coreSetFailed).toHaveBeenCalledTimes(0)
+    })
+
+    it('should close pr if migration has unwanted files', async () => {
       const svc = getSvc()
 
       mockM('runMigrationFromList', {
@@ -292,6 +855,7 @@ describe('migration service', () => {
           AtlasMigrationExecutionResponse.build(JSON.stringify(c.artifacts.no_lint_error.versionExecution?.mg1))
         ]
       })
+      mockM('buildMigrationConfigList', c.getMigrationConfigList())
       mockM('runLintFromList', {
         lintResponseList: [
           AtlasLintResponse.build(
@@ -303,13 +867,15 @@ describe('migration service', () => {
         ],
         canSkipAllErrors: false
       })
+      ghClient.getChangedFiles = jest
+        .fn()
+        .mockResolvedValue([...Object.keys(c.getMockDirectories().migrations).map(f => `migrations/${f}`), 'file/a.go'])
 
       notifier.notify = jest.fn().mockResolvedValue({
         githubComment: {},
         jiraComment: {},
         jiraIssue: getJiraIssue()
       } as NotifyResponse)
-      ghClient.addLabel = jest.fn()
 
       const response = await svc.processEvent(
         c.getPRContext({
@@ -326,588 +892,121 @@ describe('migration service', () => {
         })
       )
 
-      validateResponse(
-        response,
-        {
-          eventName: 'pull_request',
-          actionName: 'opened',
-          source: 'pr',
-          triggeredBy: c.user('user-aaa'),
-          ensureJiraTicket: true,
-          lintRequired: true
-        },
-        getPR(),
-        true
-      )
-
-      // Label added to PR
-      expect(ghClient.addLabel).toHaveBeenCalledTimes(1)
-      expect(ghClient.addLabel).toHaveBeenCalledWith(1, ['jira-ticket-created'])
-    })
-
-    // eslint-disable-next-line jest/expect-expect
-    it('should ensure jira ticket when commented', async () => {
-      mockM('runMigrationFromList', {
-        migrationAvailable: true,
-        executionResponseList: [
-          AtlasMigrationExecutionResponse.build(JSON.stringify(c.artifacts.no_lint_error.versionExecution?.mg1))
-        ]
-      })
-      mockM('runLintFromList', {
-        lintResponseList: [
-          AtlasLintResponse.build(
-            JSON.stringify(c.artifacts.no_lint_error.lintResponseOutput.mg1),
-            'mg1',
-            [],
-            LINT_CODE_DEFAULT_PREFIXES
-          )
-        ],
-        canSkipAllErrors: false
-      })
-      notifier.notify = jest.fn().mockResolvedValue({
-        githubComment: {},
-        jiraComment: {},
-        jiraIssue: getJiraIssue()
-      } as NotifyResponse)
-      ghClient.addLabel = jest.fn()
-
-      const svc = getSvc()
-
-      const response = await svc.processEvent(
-        c.getPRCommentContext({
-          action: 'created',
-          comment: c.getComment(212121, 'jira', 'user-ddd'),
-          issue: getPR(['jira-ticket-created']),
-          organization: {
-            login: 'my-org'
-          },
-          repository: c.getRepo(),
-          sender: c.user('user-aaa')
-        })
-      )
-
-      validateResponse(
-        response,
-        {
-          eventName: 'issue_comment',
-          actionName: 'created',
-          source: 'comment',
-          triggeredBy: {
-            login: 'user-aaa',
-            type: 'User'
-          },
-          commentId: 212121,
-          commentBody: 'db migrate jira',
-          lintRequired: true,
-          ensureJiraTicket: true
-        },
-        getPR(['jira-ticket-created']),
-        true
-      )
-
-      // Label added to PR
-      expect(ghClient.addLabel).toHaveBeenCalledTimes(1)
-      expect(ghClient.addLabel).toHaveBeenCalledWith(1, ['db-migration'])
-    })
-
-    it('should not execute migration when pr is not approved in github from a user of approvalTeams', async () => {
-      // pr not approved by anyone
-      ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ccc'])
-      vaultClient.getSecrets = jest.fn().mockResolvedValue({
-        CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
-      })
-      notifier.notify = jest.fn()
-
-      // JIRA ticket is approved
-      jiraClient.findIssue = jest.fn().mockResolvedValue(getApprovedJiraIssue())
-      const svc = getSvc()
-      const response = await svc.processEvent(
-        c.getPRCommentContext({
-          action: 'created',
-          comment: c.getComment(212121, '', 'user-ddd'),
-          issue: getPR(['jira-ticket-created', 'db-migration']),
-          organization: {
-            login: 'my-org'
-          },
-          repository: c.getRepo(),
-          sender: c.user('user-aaa')
-        })
-      )
-
-      const expectedErrMsg = 'PR is not approved by @my-org/dba'
-
-      expect(response).toEqual(null)
-      expect(factory.getNotifier).toHaveBeenCalledTimes(1)
-      expect(factory.getNotifier).toHaveBeenCalledWith(
-        false,
-        getPR(['jira-ticket-created', 'db-migration']),
-        {
-          eventName: 'issue_comment',
-          actionName: 'created',
-          source: 'comment',
-          triggeredBy: c.user('user-aaa'),
-          commentId: 212121,
-          commentBody: 'db migrate',
-          lintRequired: true
-        },
-        config,
-        ghClient,
-        jiraClient
-      )
-
-      expect(notifier.notify).toHaveBeenCalledTimes(1)
-
-      expect(notifier.notify).toHaveBeenCalledWith({
-        migrationRunListResponse: {
-          executionResponseList: [],
-          migrationAvailable: false,
-          errMsg: expectedErrMsg
-        }
-      })
-      expect(coreSetFailed).toHaveBeenCalledWith(expectedErrMsg)
-    })
-
-    it('should approve the pr', async () => {
-      const svc = getSvc()
-
-      mockM('runMigrationFromList', {
-        migrationAvailable: true,
-        executionResponseList: [
-          AtlasMigrationExecutionResponse.build(JSON.stringify(c.artifacts.no_lint_error.versionExecution?.mg1))
-        ]
-      })
-      notifier.notify = jest.fn().mockResolvedValue({
-        githubComment: {},
-        jiraComment: {},
-        jiraIssue: getJiraIssue()
-      } as NotifyResponse)
-      ghClient.addLabel = jest.fn()
-
-      const response = await svc.processEvent(
-        c.getPRReviewContext({
-          action: 'submitted',
-          organization: {
-            login: 'my-org'
-          },
-          pull_request: getPR(['jira-ticket-created', 'db-migration']),
-          repository: c.getRepo(),
-          review: c.getReview('user-aaa', 1111111),
-          sender: {
-            login: 'user-bbb',
-            type: 'User'
-          }
-        })
-      )
-
-      validateResponse(
-        response,
-        {
-          eventName: 'pull_request_review',
-          actionName: 'submitted',
-          skipCommentWhenNoMigrationsAvailable: true,
-          source: 'review',
-          triggeredBy: {
-            login: 'user-bbb',
-            type: 'User'
-          }
-        },
-        getPR(['jira-ticket-created', 'db-migration']),
-        false,
-        getJiraIssue()
-      )
-
-      expect(ghClient.addLabel).toHaveBeenCalledTimes(0)
-    })
-
-    it('should execute the migration', async () => {
-      // pr not approved by approvalTeams
-      ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ddd'])
-      vaultClient.getSecrets = jest.fn().mockResolvedValue({
-        CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
-      })
-      // JIRA ticket is approved
-      jiraClient.findIssue = jest.fn().mockResolvedValue(getApprovedJiraIssue())
-      mockM('runMigrationFromList', {
-        migrationAvailable: true,
-        executionResponseList: [
-          AtlasMigrationExecutionResponse.build(JSON.stringify(c.artifacts.no_lint_error.versionExecution?.mg1))
-        ]
-      })
-      mockM('runLintFromList', {
-        lintResponseList: [
-          AtlasLintResponse.build(
-            c.artifacts.no_lint_error.lintResponseOutput.mg1,
-            'mg1',
-            [],
-            LINT_CODE_DEFAULT_PREFIXES
-          )
-        ],
-        canSkipAllErrors: false
-      })
-      notifier.notify = jest.fn()
-
-      const svc = getSvc()
-      const response = await svc.processEvent(
-        c.getPRCommentContext({
-          action: 'created',
-          comment: c.getComment(212121, '', 'user-ddd'),
-          issue: getPR(['jira-ticket-created', 'db-migration']),
-          organization: {
-            login: 'my-org'
-          },
-          repository: c.getRepo(),
-          sender: c.user('user-aaa')
-        })
-      )
-
-      const expectedExecutionResponseList = [
-        {
-          containsMigrations: true,
-          migrations: buildMVER(c.artifacts.no_lint_error.versionExecution?.mg1)
-        }
-      ]
-
-      const expectedResponse = {
-        lintResponseList: {
-          lintResponseList: [
-            {
-              fileLintResults: [],
-              migrationDir: 'mg1',
-              allSkipped: true
-            }
-          ],
-          canSkipAllErrors: false
-        },
-        executionResponseList: expectedExecutionResponseList,
-        migrationAvailable: true,
-        ignore: false
-      }
-
-      expect(response).toEqual(expectedResponse)
-      // Notified thus creating Github comment and JIRA issue
-      expect(factory.getNotifier).toHaveBeenCalledTimes(1)
-      expect(factory.getNotifier).toHaveBeenCalledWith(
-        false,
-        getPR(['jira-ticket-created', 'db-migration']),
-        {
-          eventName: 'issue_comment',
-          actionName: 'created',
-          source: 'comment',
-          triggeredBy: { login: 'user-aaa', type: 'User' },
-          commentId: 212121,
-          commentBody: 'db migrate',
-          lintRequired: true
-        },
-        config,
-        ghClient,
-        jiraClient
-      )
-      expect(notifier.notify).toHaveBeenCalledTimes(1)
-      expect(notifier.notify).toHaveBeenCalledWith({
-        migrationRunListResponse: {
-          migrationAvailable: true,
-          executionResponseList: expectedExecutionResponseList
-        }
-      })
-    })
-
-    it('should error out while execute the migration on linting errors', async () => {
-      // pr not approved by approvalTeams
-      ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ddd'])
-      vaultClient.getSecrets = jest.fn().mockResolvedValue({
-        CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
-      })
-      // JIRA ticket is approved
-      jiraClient.findIssue = jest.fn().mockResolvedValue(getApprovedJiraIssue())
-      mockM('runLintFromList', {
-        lintResponseList: [
-          AtlasLintResponse.build(
-            JSON.stringify(c.artifacts.sql_file_error_lint_skipped.lintResponseOutput.mg1),
-            'mg1',
-            [],
-            LINT_CODE_DEFAULT_PREFIXES
-          )
-        ],
-        errMsg: 'some error encountered',
-        canSkipAllErrors: false
-      })
-      notifier.notify = jest.fn()
-
-      const svc = getSvc()
-      const response = await svc.processEvent(
-        c.getPRCommentContext({
-          action: 'created',
-          comment: c.getComment(212121, '', 'user-ddd'),
-          issue: getPR(['jira-ticket-created', 'db-migration']),
-          organization: {
-            login: 'my-org'
-          },
-          repository: c.getRepo(),
-          sender: c.user('user-aaa')
-        })
-      )
-
-      const expectedLintResponse = {
-        lintResponseList: [
-          {
-            fileLintResults: [],
-            migrationDir: 'mg1',
-            allSkipped: false,
-            firstError:
-              '"[{\\"Name\\":\\"20231222064941_step3.sql\\",\\"Error\\":\\"executing statement: pq: column \\\\\\"email\\\\\\" does not exist\\"}]"'
-          }
-        ],
-        errMsg: 'some error encountered',
-        canSkipAllErrors: false
-      }
-
       expect(response).toEqual({
-        lintResponseList: expectedLintResponse,
         executionResponseList: [],
-        migrationAvailable: false,
+        migrationAvailable: true,
         ignore: true
       })
 
-      // Notified thus creating Github comment and JIRA issue
-      expect(factory.getNotifier).toHaveBeenCalledTimes(1)
-      expect(factory.getNotifier).toHaveBeenCalledWith(
-        false,
-        getPR(['jira-ticket-created', 'db-migration']),
-        {
-          eventName: 'issue_comment',
-          actionName: 'created',
-          source: 'comment',
-          triggeredBy: { login: 'user-aaa', type: 'User' },
-          commentId: 212121,
-          commentBody: 'db migrate',
-          lintRequired: true
-        },
-        config,
-        ghClient,
-        jiraClient
-      )
       expect(notifier.notify).toHaveBeenCalledTimes(1)
       expect(notifier.notify).toHaveBeenCalledWith({
+        pr: getPR(),
+        migrationMeta: {
+          actionName: 'opened',
+          ensureJiraTicket: true,
+          eventName: 'pull_request',
+          lintRequired: true,
+          source: 'pr',
+          triggeredBy: {
+            login: 'user-aaa',
+            type: 'User'
+          }
+        },
         migrationRunListResponse: {
           migrationAvailable: false,
           executionResponseList: []
         },
-        jiraIssue: getApprovedJiraIssue(),
-        lintResponseList: {
-          lintResponseList: [
-            {
-              fileLintResults: [],
-              migrationDir: 'mg1',
-              allSkipped: false,
-              firstError:
-                '"[{\\"Name\\":\\"20231222064941_step3.sql\\",\\"Error\\":\\"executing statement: pq: column \\\\\\"email\\\\\\" does not exist\\"}]"'
-            }
-          ],
-          errMsg: 'some error encountered',
-          canSkipAllErrors: false
-        }
+        changedFileValidation: {
+          errMsg: 'Unwanted files found',
+          migrationAvailable: true,
+          unmatched: ['file/a.go']
+        },
+        closePR: true
       })
-      expect(migration.runMigrationFromList).toHaveBeenCalledTimes(0)
-      expect(coreSetFailed).toHaveBeenCalledWith('some error encountered')
+
+      expect(coreSetFailed).toHaveBeenCalledWith('Unwanted files found')
     })
   })
 
-  it('should skip pr approval when pr has label missing', async () => {
-    const svc = getSvc()
-
-    const response = await svc.processEvent(
-      c.getPRReviewContext({
-        action: 'submitted',
-        organization: {
-          login: 'my-org'
-        },
-        pull_request: getPR(true),
-        repository: c.getRepo(),
-        review: c.getReview('user-aaa', 1111111),
-        sender: {
-          login: 'user-bbb',
-          type: 'User'
-        }
+  describe('processDrift', () => {
+    // !driftRunListResponse.errMsg && driftRunListResponse.hasSchemaDrifts === false
+    it('should have no schema drifts', async () => {
+      const svc = getSvc()
+      const driftRunListResponse = { hasSchemaDrifts: false, drifts: [] }
+      vaultClient.getSecrets = jest.fn().mockResolvedValue({
+        CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc?search_path=public'
       })
-    )
+      mockM('runSchemaDriftFromList', driftRunListResponse)
 
-    expect(response).toEqual({ executionResponseList: [], migrationAvailable: false, ignore: true })
-  })
+      const response = await svc.processDrift(
+        c.getScheduleContext({
+          action: 'cron'
+        })
+      )
 
-  it('should error while executing the migration', async () => {
-    const expectedErrMsg = 'some error'
-
-    // pr not approved by approvalTeams
-    ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ddd'])
-    vaultClient.getSecrets = jest.fn().mockResolvedValue({
-      CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
+      expect(response).toEqual({ driftRunListResponse })
     })
-    // JIRA ticket is approved
-    jiraClient.findIssue = jest.fn().mockResolvedValue(getApprovedJiraIssue())
-    mockM('runMigrationFromList', {
-      migrationAvailable: true,
-      executionResponseList: [AtlasMigrationExecutionResponse.fromError(expectedErrMsg)],
-      errMsg: expectedErrMsg
-    })
-    mockM('runLintFromList', { lintResponseList: [], canSkipAllErrors: false })
-    notifier.notify = jest.fn()
-
-    const svc = getSvc()
-    const response = await svc.processEvent(
-      c.getPRCommentContext({
-        action: 'created',
-        comment: c.getComment(212121, '', 'user-ddd'),
-        issue: getPR(),
-        organization: {
-          login: 'my-org'
-        },
-        repository: c.getRepo(),
-        sender: c.user('user-aaa')
+    it('should skip for invalid event name', async () => {
+      const svc = getSvc()
+      const driftRunListResponse = { hasSchemaDrifts: false, drifts: [] }
+      vaultClient.getSecrets = jest.fn().mockResolvedValue({
+        CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc?search_path=public'
       })
-    )
+      mockM('runSchemaDriftFromList', driftRunListResponse)
+      svc.skipProcessingHandler = jest.fn()
 
-    const expectedExecutionResponseList = [
-      {
-        containsMigrations: false,
-        migrations: [],
-        firstError: expectedErrMsg
-      }
-    ]
+      const contextSchedule = c.getScheduleContext({ action: 'cron' }) as any
+      contextSchedule.eventName = 'invalid_event'
 
-    const expectedResponse = {
-      lintResponseList: { lintResponseList: [], canSkipAllErrors: false },
-      executionResponseList: [{ containsMigrations: false, migrations: [], firstError: expectedErrMsg }],
-      migrationAvailable: true,
-      ignore: true
-    }
+      const response = await svc.processDrift(contextSchedule)
 
-    expect(response).toEqual(expectedResponse)
-    // Notified thus creating Github comment and JIRA issue
-    expect(factory.getNotifier).toHaveBeenCalledTimes(1)
-    expect(factory.getNotifier).toHaveBeenCalledWith(
-      false,
-      getPR(),
-      {
-        eventName: 'issue_comment',
-        actionName: 'created',
-        source: 'comment',
-        triggeredBy: { login: 'user-aaa', type: 'User' },
-        commentId: 212121,
-        commentBody: 'db migrate',
-        lintRequired: true
-      },
-      config,
-      ghClient,
-      jiraClient
-    )
-    expect(notifier.notify).toHaveBeenCalledTimes(1)
-    expect(notifier.notify).toHaveBeenCalledWith({
-      migrationRunListResponse: {
-        migrationAvailable: true,
-        executionResponseList: expectedExecutionResponseList,
-        errMsg: expectedErrMsg
-      }
+      expect(response).toEqual(undefined)
+      expect(svc.skipProcessingHandler).toHaveBeenCalledWith('invalid_event', { action: 'cron' })
     })
+    // notifier.drift
+    it('should have drifts', async () => {
+      const svc = getSvc()
+      const driftRunListResponse = { hasSchemaDrifts: true, drifts: [AtlasDriftResponse.build('some error')] }
+      const jiraIssue = getApprovedJiraIssue(false, true)
 
-    expect(coreSetFailed).toHaveBeenCalledWith(expectedErrMsg)
-  })
-
-  // You add SQL files in PR. The label will be added to the PR
-  // after that when PR is removed, then the gha register the error(core.error method)
-
-  it('should return silently when sql files are removed from PR', async () => {
-    ghClient.getChangedFiles = jest.fn().mockResolvedValue([])
-
-    const svc = getSvc()
-    const response = await svc.processEvent(
-      c.getPRContext({
-        action: 'synchronize',
-        after: 'xxxxx',
-        before: 'aaaaaa',
-        number: 1,
-        organization: {
-          login: 'my-org'
-        },
-        pull_request: getPR(),
-        repository: c.getRepo(),
-        sender: c.user('user-aaa')
+      vaultClient.getSecrets = jest.fn().mockResolvedValue({
+        CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc?search_path=public'
       })
-    )
+      jiraClient.findSchemaDriftIssue = jest.fn().mockResolvedValue(jiraIssue)
+      notifier.drift = jest.fn().mockResolvedValue({ jiraIssue, jiraComment: undefined })
+      mockM('runSchemaDriftFromList', driftRunListResponse)
 
-    expect(response).toEqual({
-      executionResponseList: [],
-      migrationAvailable: false,
-      ignore: true
+      const response = await svc.processDrift(
+        c.getScheduleContext({
+          action: 'cron'
+        })
+      )
+
+      expect(response).toEqual({ driftRunListResponse, jiraIssue, jiraComment: undefined })
+      expect(jiraClient.findSchemaDriftIssue).toHaveBeenCalledTimes(1)
+      expect(jiraClient.findSchemaDriftIssue).toHaveBeenCalledWith(config.serviceName, config.jira?.doneValue)
+      expect(notifier.drift).toHaveBeenCalledWith({ driftRunListResponse, jiraIssue })
     })
-    expect(coreSetFailed).toHaveBeenCalledTimes(0)
-  })
 
-  it('should close pr if migration has unwanted files', async () => {
-    const svc = getSvc()
+    it('should have drifts without jira integration', async () => {
+      const driftRunListResponse = { hasSchemaDrifts: true, drifts: [AtlasDriftResponse.build('some error')] }
+      const jiraIssue = undefined
 
-    mockM('runMigrationFromList', {
-      migrationAvailable: true,
-      executionResponseList: [
-        AtlasMigrationExecutionResponse.build(JSON.stringify(c.artifacts.no_lint_error.versionExecution?.mg1))
-      ]
-    })
-    mockM('buildMigrationConfigList', c.getMigrationConfigList())
-    mockM('runLintFromList', {
-      lintResponseList: [
-        AtlasLintResponse.build(
-          JSON.stringify(c.artifacts.no_lint_error.lintResponseOutput.mg1),
-          'mg1',
-          [],
-          LINT_CODE_DEFAULT_PREFIXES
-        )
-      ],
-      canSkipAllErrors: false
-    })
-    ghClient.getChangedFiles = jest
-      .fn()
-      .mockResolvedValue([...Object.keys(c.getMockDirectories().migrations).map(f => `migrations/${f}`), 'file/a.go'])
-
-    notifier.notify = jest.fn().mockResolvedValue({
-      githubComment: {},
-      jiraComment: {},
-      jiraIssue: getJiraIssue()
-    } as NotifyResponse)
-
-    const response = await svc.processEvent(
-      c.getPRContext({
-        action: 'opened',
-        after: 'xxxxx',
-        before: 'aaaaaa',
-        number: 1,
-        organization: {
-          login: 'my-org'
-        },
-        pull_request: getPR(),
-        repository: c.getRepo(),
-        sender: c.user('user-aaa')
+      vaultClient.getSecrets = jest.fn().mockResolvedValue({
+        CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc?search_path=public'
       })
-    )
+      notifier.drift = jest.fn().mockResolvedValue({ jiraIssue, jiraComment: undefined })
+      mockM('runSchemaDriftFromList', driftRunListResponse)
 
-    expect(response).toEqual({
-      executionResponseList: [],
-      migrationAvailable: true,
-      ignore: true
+      const svc = getSvc({ jiraConfig: null })
+      const response = await svc.processDrift(
+        c.getScheduleContext({
+          action: 'cron'
+        })
+      )
+
+      expect(response).toEqual({ driftRunListResponse, jiraIssue, jiraComment: undefined })
+      expect(notifier.drift).toHaveBeenCalledWith({ driftRunListResponse, jiraIssue })
     })
-
-    expect(notifier.notify).toHaveBeenCalledTimes(1)
-    expect(notifier.notify).toHaveBeenCalledWith({
-      migrationRunListResponse: {
-        migrationAvailable: false,
-        executionResponseList: []
-      },
-      changedFileValidation: {
-        errMsg: 'Unwanted files found',
-        migrationAvailable: true,
-        unmatched: ['file/a.go']
-      },
-      closePR: true
-    })
-
-    expect(coreSetFailed).toHaveBeenCalledWith('Unwanted files found')
   })
 })

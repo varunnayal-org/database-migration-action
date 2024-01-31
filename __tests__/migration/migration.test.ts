@@ -5,7 +5,7 @@ import * as atlas from '../../src/migration/atlas'
 import * as migration from '../../src/migration/migration'
 import { DatabaseConfig, DriftExecutionResponse, MigrationConfig, MigrationRunListResponse } from '../../src/types'
 import { SecretMap } from '../../src/client/vault/types'
-import { AtlasLintResponse, AtlasMigrationExecutionResponse, DriftResponse } from '../../src/migration/atlas-class'
+import { AtlasLintResponse, AtlasMigrationExecutionResponse, AtlasDriftResponse } from '../../src/migration/atlas-class'
 import * as c from '../common'
 import { LINT_CODE_DEFAULT_PREFIXES, TEMP_DIR_FOR_MIGRATION } from '../../src/constants'
 
@@ -587,10 +587,11 @@ describe('runSchemaDriftFromList', () => {
       )
     ]
 
-    const atlasDriftFn = atlasDriftMockFn([DriftResponse.build(''), DriftResponse.build('')])
+    const atlasDriftFn = atlasDriftMockFn([AtlasDriftResponse.build(''), AtlasDriftResponse.build('')])
     const response = await migration.runSchemaDriftFromList(migrationConfig)
 
     expect(response).toEqual({
+      hasSchemaDrifts: false,
       drifts: [{ statements: [] }, { statements: [] }]
     })
     expect(atlasDriftFn).toHaveBeenCalledTimes(2)
@@ -598,7 +599,7 @@ describe('runSchemaDriftFromList', () => {
     expect(atlasDriftFn).toHaveBeenNthCalledWith(2, migrationConfig[1])
   })
 
-  it('should return error', async () => {
+  it('should return unexpected error', async () => {
     const migrationConfig = [
       ...c.getMigrationConfigList('db1', '', 'multi_db_dir'),
       ...c.getMigrationConfigList(
@@ -614,9 +615,9 @@ describe('runSchemaDriftFromList', () => {
     ]
 
     const atlasDriftFn = atlasDriftMockFn([
-      DriftResponse.build(''),
-      DriftResponse.fromError('some error'),
-      DriftResponse.fromError('some other error')
+      AtlasDriftResponse.build(''),
+      AtlasDriftResponse.fromError('some error'),
+      AtlasDriftResponse.fromError('some other error')
     ])
     const response = await migration.runSchemaDriftFromList(migrationConfig)
 
@@ -626,7 +627,43 @@ describe('runSchemaDriftFromList', () => {
         { statements: [], error: 'some error' },
         { statements: [], error: 'some other error' }
       ],
+      hasSchemaDrifts: false,
       errMsg: 'some error'
+    })
+    expect(atlasDriftFn).toHaveBeenCalledTimes(3)
+    expect(atlasDriftFn).toHaveBeenNthCalledWith(1, migrationConfig[0])
+    expect(atlasDriftFn).toHaveBeenNthCalledWith(2, migrationConfig[1])
+    expect(atlasDriftFn).toHaveBeenNthCalledWith(3, migrationConfig[2])
+  })
+
+  it('should return drift error', async () => {
+    const migrationConfig = [
+      ...c.getMigrationConfigList('db1', '', 'multi_db_dir'),
+      ...c.getMigrationConfigList(
+        'db2',
+        'postgres://root:secret@db.host:5432/appdb2?search_path=public',
+        'multi_db_dir'
+      ),
+      ...c.getMigrationConfigList(
+        'db2',
+        'postgres://root:secret@db.host:5432/appdb3?search_path=public',
+        'multi_db_dir'
+      )
+    ]
+
+    const atlasDriftFn = atlasDriftMockFn([
+      AtlasDriftResponse.build(''),
+      AtlasDriftResponse.build('-- comment\ndrop index a;'),
+      AtlasDriftResponse.build('-- comment2\ndrop index b;')
+    ])
+    const response = await migration.runSchemaDriftFromList(migrationConfig)
+    expect(response).toEqual({
+      drifts: [
+        { statements: [] },
+        { statements: [{ command: 'drop index a;\n', comment: '-- comment' }] },
+        { statements: [{ command: 'drop index b;\n', comment: '-- comment2' }] }
+      ],
+      hasSchemaDrifts: true
     })
     expect(atlasDriftFn).toHaveBeenCalledTimes(3)
     expect(atlasDriftFn).toHaveBeenNthCalledWith(1, migrationConfig[0])

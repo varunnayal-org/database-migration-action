@@ -7,6 +7,8 @@ import {
   DEFAULT_JIRA_COMPLETED_STATUS,
   DEFAULT_JIRA_DRI_APPROVAL_STATUS,
   DEFAULT_JIRA_ISSUE_TYPE,
+  DEFAULT_JIRA_SCHEMA_DRIFT_ISSUE_TYPE,
+  DEFAULT_JIRA_SCHEMA_DRIFT_LABEL,
   DEFAULT_MIGRATION_BASE_DIR,
   DEFAULT_MIGRATION_CHILD_DIR,
   DEFAULT_PR_LABEL,
@@ -92,9 +94,14 @@ const getJiraConfig = (jiraLabel: string): JIRAConfig | undefined => {
   if (!jiraConfig.fields.pr) {
     throw new Error('Jira config missing pr field')
   }
+  if (!jiraConfig.fields.repo) {
+    throw new Error('Jira config missing repo field')
+  }
 
   jiraConfig.issueType = jiraConfig.issueType || DEFAULT_JIRA_ISSUE_TYPE
   jiraConfig.label = jiraLabel
+  jiraConfig.schemaDriftIssueType = jiraConfig.schemaDriftIssueType || DEFAULT_JIRA_SCHEMA_DRIFT_ISSUE_TYPE
+  jiraConfig.schemaDriftLabel = jiraConfig.schemaDriftLabel || DEFAULT_JIRA_SCHEMA_DRIFT_LABEL
   jiraConfig.doneValue = jiraConfig.doneValue || DEFAULT_JIRA_COMPLETED_STATUS
 
   if ('driApprovals' in jiraConfig.fields) {

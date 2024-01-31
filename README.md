@@ -35,7 +35,6 @@ Flow diagram: [flow.puml](./docs/diagrams/flow.puml)
 
 - [ ] Schedule migrations
 - [ ] Single repository multi deployment
-- [ ] Schema changes after approval
 
 ### Action Items
 
@@ -57,13 +56,10 @@ Flow diagram: [flow.puml](./docs/diagrams/flow.puml)
 - [x] Close PR if schema migration contain other files
 - [x] Dry run on actual schema replica
   - [x] Can we use Postgres service
-- [ ] How to kill long running migrations:
+- [x] How to kill long running migrations:
   > It's going to be a manual process where DBA can refer/use [pg_terminate_backend](https://stackoverflow.com/a/35319598) command.
-- [ ] How to capture database drifts
-  > We can use `atlas schema diff` command to find the different b/w what's there in migration directory to production.
-  > More [here](https://atlasgo.io/declarative/diff#compare-a-migration-directory-to-a-database).
-  - [ ] Create a daily cron to capture drifts
-- [ ] How can DBA run migrations manually instead of commands? Write an SOP for the same. How will DBA sync migration table?
+- [x] How to capture database drifts [schema drifts](./docs/schema-drift.md)
+- [x] How can DBA run migrations manually instead of commands? Write an SOP for the same. How will DBA sync migration table: See [Manual Migration](./docs/cases.md#manual-migration)
 - [x] A separate PR for migrations. Close PR if it contains business logic files
   [PR is auto-closed](./docs/cases.md#auto-close-pr)
 - [x] A PR template for migrations PRs: [pull_request_template](./docs/pull_request_template.md)
@@ -153,9 +149,11 @@ This setup is require only one time per organization that includes
 
 ```jsonc
 {
-  "host": "{domain}.atlassian.net", // JIRA host
-  "project": "SCHEMA",              // Project
-  "issueType": "Story",             // Story, Task etc. Default "Story"
+  "host": "{domain}.atlassian.net",       // JIRA host
+  "project": "SCHEMA",                    // Project
+  "issueType": "Story",                   // Story, Task etc. Default "Story"
+  "schemaDriftLabel": "db-schema-drift",  // Default to 'db-schema-drift'. Label to add to ticket created for schema drifts.
+  "schemaDriftIssueType": "Bug",          // Default to 'Bug'. Type of ticket for schema drift tickets
   "fields": {
     "pr" : "customfield_11111",     // Pull Request Link field
     "prLabel": "Label for pr field",// Label for "PR" field

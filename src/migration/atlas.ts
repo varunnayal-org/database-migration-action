@@ -1,6 +1,6 @@
 import * as core from '@actions/core'
 import * as util from '../util'
-import { AtlasLintResponse, AtlasMigrationExecutionResponse, DriftResponse } from './atlas-class'
+import { AtlasLintResponse, AtlasMigrationExecutionResponse, AtlasDriftResponse } from './atlas-class'
 import { DriftExecutionResponse, MigrationConfig, MigrationExecutionResponse } from '../types'
 import { ATLAS_CONFIG_FILE_NAME, ATLAS_HCL } from '../constants'
 
@@ -137,18 +137,18 @@ async function drift(migrationConfig: MigrationConfig): Promise<DriftExecutionRe
       '--to',
       removeSearchPathFromURL(migrationConfig.databaseUrl),
       '--dev-url',
-      migrationConfig.devUrl,
+      removeSearchPathFromURL(migrationConfig.devUrl),
       '--format',
       '"{{ sql . "  " }}"'
     ]
 
     core.debug(`Drift detection for directory ${migrationConfig.dir}`)
     const response = await util.exec('atlas', driftArgs)
-    return DriftResponse.build(response)
+    return AtlasDriftResponse.build(response)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (ex: any) {
     core.error(`ErrorDrift[tmp_dir=${migrationConfig.dir}]: ${ex} ${ex.stack}`)
-    return DriftResponse.fromError(ex.message)
+    return AtlasDriftResponse.fromError(ex.message)
   }
 }
 

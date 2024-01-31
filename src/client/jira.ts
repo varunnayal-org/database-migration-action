@@ -7,6 +7,8 @@ class Client implements JiraClient {
   #project: string
   #ticketLabel: string
   #issueType: string
+  #schemaDriftTicketLabel: string
+  #schemaDriftIssueType: string
   #fields: CustomFields
   #api: JiraApi
 
@@ -18,8 +20,10 @@ class Client implements JiraClient {
     }
 
     this.#project = project
-    this.#ticketLabel = config.label || ''
-    this.#issueType = config.issueType || 'Task'
+    this.#ticketLabel = config.label
+    this.#issueType = config.issueType
+    this.#schemaDriftTicketLabel = config.schemaDriftLabel
+    this.#schemaDriftIssueType = config.schemaDriftIssueType
     this.#fields = config.fields || {}
     this.#api = api
   }
@@ -36,7 +40,6 @@ class Client implements JiraClient {
 
   async #search(searchText: string): Promise<JiraIssue | null> {
     const jql = `project="${this.#project}" AND ${searchText}`
-    core.debug(`Jira Search Text: [${jql}]`)
 
     const response = await executeWithRetry(async () => this.#api.searchJira(jql, { maxResults: 2 }), 'SearchIssue')
     if (response.issues.length === 0) {
@@ -51,26 +54,37 @@ class Client implements JiraClient {
     return await this.#search(`"${this.#fields.prLabel || this.#fields.pr}" = "${prLink}"`)
   }
 
+  async findSchemaDriftIssue(serviceName: string, doneStatus: string): Promise<JiraIssue | null> {
+    return await this.#search(
+      `"labels" = "${this.#schemaDriftTicketLabel}" AND "labels" = "${serviceName}" AND status != "${doneStatus}"`
+    )
+  }
+
   async createIssue(createTicketParams: CreateTicketParams): Promise<JiraIssue> {
-    const { description, assigneeName, prLink } = createTicketParams
+    const { description, assigneeName } = createTicketParams
+    const labels = [this.#ticketLabel]
     const createJiraTicketParams: IssueObject = {
       fields: {
         project: {
           key: this.#project
         },
-        summary: createTicketParams.prLink,
         issuetype: {
           name: this.#issueType
         },
-        labels: [this.#ticketLabel],
         description,
-        [this.#fields.pr]: prLink
+        summary: createTicketParams.repoLink,
+        [this.#fields.repo]: createTicketParams.repoLink
       }
     }
 
-    if (this.#fields.repo) {
-      createJiraTicketParams.fields[this.#fields.repo] = createTicketParams.repoLink
+    if ('isSchemaDrift' in createTicketParams) {
+      labels.push(this.#schemaDriftTicketLabel)
+      createJiraTicketParams.fields.issuetype.name = this.#schemaDriftIssueType
+    } else {
+      createJiraTicketParams.fields.summary = createTicketParams.prLink
+      createJiraTicketParams.fields[this.#fields.pr] = createTicketParams.prLink
     }
+    createJiraTicketParams.fields.labels = labels
 
     if (assigneeName) {
       createJiraTicketParams.fields.assignee = {

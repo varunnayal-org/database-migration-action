@@ -204,7 +204,7 @@ describe('atlas', () => {
         '--to',
         'postgres://root:secret@db.host:5432/appdb',
         '--dev-url',
-        'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled&search_path=public',
+        'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled',
         '--format',
         '"{{ sql . "  " }}"'
       ])

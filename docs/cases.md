@@ -2,6 +2,7 @@
 
 - [Cases](#cases)
   - [Auto close PR](#auto-close-pr)
+  - [Manual Migration](#manual-migration)
   - [Out of order Execution](#out-of-order-execution)
   - [Lock and timeouts](#lock-and-timeouts)
   - [Drop index concurrently issue](#drop-index-concurrently-issue)
@@ -29,9 +30,30 @@
 IF the PR contains files that should not be a part of PR, then this action automatically closes the PR.
 Following are the files allowed in PR
 
-- Any `sql`, `yml`, `yaml` file
+- Any `.yml`, `.yaml`, `.sql`, `.sum`, `.hcl`, `.xml`, `.json` file
 - DB Migration configuration file provided in action input or defaults to `./db.migration.json`
 - `Makefile`
+
+## Manual Migration
+
+There might be cases where we have to deal with scenarios where
+
+- We need to capture schema changes in our repository but don't want to run them. This situation might arise when we fix [schema drifts](./schema-drift.md)
+- If DBA runs the migrations explicitly(they already know connection string) that are already raised in a PR. Developer from service team should help them out.
+
+In these scenarios, DBA should capture the schema migration in the `atlas_schema_revisions` table.
+
+- The schema file is in format `{revision}_{description}.sql`. Consider the file `20231207062947_add_phone.sql` for which we want to capture it in schema w/o running the migrations. DBA will run following query:
+  - `applied` and `total` should be set to same non zero positive value. Set to `1` here.
+  - `hash` should be the one calculated by `atlas`. But in this case it doesn't matter as `applied` and `total` are set to same value.
+
+  ```sql
+  INSERT INTO atlas_schema_revisions(version,description,type,applied,total,executed_at,execution_time,hash,operator_version)
+  VALUES ('20231207062947', 'add_phone', 2, 1, 1, now(), 1, '', 'Atlas CLI v0.18.0');
+  ```
+
+- If this is the only file in the PR or the last pending file in the migration files(considering previous one has been executed), then we can safely merge the PR
+  - Else, use `db migrate` command.
 
 ## Out of order Execution
 

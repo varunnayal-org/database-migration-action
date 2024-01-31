@@ -26,6 +26,8 @@ describe('JiraApi', () => {
         repo: 'customfield_2',
         driApprovals: ['customfield_3']
       },
+      schemaDriftLabel: 'db-schema-drift',
+      schemaDriftIssueType: 'Bug',
       doneValue: 'DONE'
     }
   }
@@ -180,6 +182,36 @@ describe('JiraApi', () => {
     })
   })
 
+  describe('findSchemaDriftIssue', () => {
+    let mockSearchResponse: any
+    beforeEach(() => {
+      mockSearchResponse = {
+        issues: [
+          {
+            id: 1,
+            key: 'KEY-1',
+            self: 'http://example.com/issue/1',
+            fields: {}
+          }
+        ]
+      }
+    })
+
+    it('should find issue', async () => {
+      const jira = new Client(mockJiraApi, config)
+
+      mockSearchJira.mockResolvedValue(mockSearchResponse)
+
+      const result = await jira.findSchemaDriftIssue('my-svc', config.doneValue)
+
+      expect(result).toEqual(mockSearchResponse.issues[0])
+      expect(mockSearchJira).toHaveBeenCalledWith(
+        `project="${config.project}" AND "labels" = "${config.schemaDriftLabel}" AND "labels" = "my-svc" AND status != "${config.doneValue}"`,
+        { maxResults: 2 }
+      )
+    })
+  })
+
   describe('createIssue', () => {
     let crateJiraTicketParams: any
     beforeEach(() => {
@@ -195,7 +227,7 @@ describe('JiraApi', () => {
           },
           labels: ['db-migration'],
           customfield_1: 'http://example.com/repo/pulls/1',
-          customfield_2: 'http://exampl.com/repo'
+          customfield_2: 'http://example.com/repo'
         }
       }
     })
@@ -211,9 +243,8 @@ describe('JiraApi', () => {
 
       const result = await jira.createIssue({
         prNumber: 1,
-        title: 'Test Summary',
         prLink: 'http://example.com/repo/pulls/1',
-        repoLink: 'http://exampl.com/repo',
+        repoLink: 'http://example.com/repo',
         description: 'Test Description',
         assigneeName: undefined
       })
@@ -227,10 +258,7 @@ describe('JiraApi', () => {
       expect(mockCreateIssue).toHaveBeenCalledWith(crateJiraTicketParams)
     })
 
-    it('should create issue without setting repo link', async () => {
-      delete crateJiraTicketParams.fields.customfield_2
-      config.fields.repo = ''
-
+    it('should create schema drift issue', async () => {
       const jira = new Client(mockJiraApi, config)
 
       mockCreateIssue.mockResolvedValue({
@@ -241,12 +269,9 @@ describe('JiraApi', () => {
       })
 
       const result = await jira.createIssue({
-        prNumber: 1,
-        title: 'Test Summary',
-        prLink: 'http://example.com/repo/pulls/1',
-        repoLink: 'http://exampl.com/repo',
-        description: 'Test Description',
-        assigneeName: undefined
+        isSchemaDrift: true,
+        repoLink: 'http://example.com/repo',
+        description: 'Schema drift description'
       })
 
       expect(result).toEqual({
@@ -255,7 +280,20 @@ describe('JiraApi', () => {
         self: 'http://example.com/issue/1',
         fields: {}
       })
-      expect(mockCreateIssue).toHaveBeenCalledWith(crateJiraTicketParams)
+      expect(mockCreateIssue).toHaveBeenCalledWith({
+        fields: {
+          project: {
+            key: 'TEST'
+          },
+          summary: 'http://example.com/repo',
+          description: 'Schema drift description',
+          issuetype: {
+            name: 'Bug'
+          },
+          labels: ['db-migration', 'db-schema-drift'],
+          customfield_2: 'http://example.com/repo'
+        }
+      })
     })
 
     it('should set assignee', async () => {
@@ -274,9 +312,8 @@ describe('JiraApi', () => {
 
       const result = await jira.createIssue({
         prNumber: 1,
-        title: 'Test Summary',
         prLink: 'http://example.com/repo/pulls/1',
-        repoLink: 'http://exampl.com/repo',
+        repoLink: 'http://example.com/repo',
         description: 'Test Description',
         assigneeName: 'user'
       })

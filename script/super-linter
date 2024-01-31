@@ -2,6 +2,7 @@
 
 docker \
   run \
+  --name super-linter \
   -e RUN_LOCAL=true \
   -e USE_FIND_ALGORITHM=true \
   -e IGNORE_GITIGNORED_FILES=true \

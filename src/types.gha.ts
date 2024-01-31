@@ -9,6 +9,7 @@ export type EventName = EventNamePullRequest | EventNamePullRequestReview | Even
 type EventNamePullRequestReview = 'pull_request_review'
 type EventNamePullRequest = 'pull_request'
 type EventNamePullRequestComment = 'issue_comment'
+type EventNameSchedule = 'schedule'
 
 /**
  * The context for the event that triggered the workflow.
@@ -144,13 +145,19 @@ export interface PullRequestCommentPayload {
   sender: User
 }
 
+export interface SchedulePayload {
+  action: string
+}
+
 export type ContextPullRequestReview = GithubContext<PullRequestReviewPayload, EventNamePullRequestReview>
 
 export type ContextPullRequest = GithubContext<PullRequestPayload, EventNamePullRequest>
 
 export type ContextPullRequestComment = GithubContext<PullRequestCommentPayload, EventNamePullRequestComment>
 
-export type Context = ContextPullRequest | ContextPullRequestReview | ContextPullRequestComment
+export type ContextSchedule = GithubContext<SchedulePayload, EventNameSchedule>
+
+export type Context = ContextSchedule | ContextPullRequest | ContextPullRequestReview | ContextPullRequestComment
 
 export type GithubClient = ReturnType<typeof github.getOctokit> // InstanceType<typeof GitHub>
 

@@ -1,4 +1,10 @@
-import { Formatter, ITextBuilder, LintExecutionResponse, MigrationRunListResponse } from '../types'
+import {
+  DriftRunListResponse,
+  Formatter,
+  ITextBuilder,
+  LintExecutionResponse,
+  MigrationRunListResponse
+} from '../types'
 import * as util from '../util'
 import { Platform, formatterMap } from './formatters'
 
@@ -168,6 +174,30 @@ export class TextBuilder {
   getFormatter(name: Platform): Formatter {
     return formatterMap[name]
   }
+
+  buildDrift(driftResponse: DriftRunListResponse, fmt: Formatter): string {
+    return driftResponse.drifts.reduce<string>((acc, drift, idx) => {
+      acc += `\n${fmt.italic('Directory')}: ${fmt.bold(this.dbDirList[idx])}: `
+      const errMsg = drift.getError()
+      if (errMsg !== undefined) {
+        acc += `${fmt.failure} ${fmt.cEsc(errMsg)}`
+        return acc
+      }
+
+      const driftStatements = drift.getStatements()
+      if (driftStatements.length === 0) {
+        return (acc += `${fmt.success} No Drift`)
+      }
+
+      const sqlStatement = driftStatements.reduce<string[]>((sqlAcc, statement) => {
+        sqlAcc.push(`${statement.comment}\n${statement.command}`)
+        return sqlAcc
+      }, [])
+
+      acc += `${fmt.failure} Drifts present\n${fmt.sqlStatementBuilder(sqlStatement.join('\n'))}\n`
+      return acc
+    }, '')
+  }
 }
 
 class JiraTextBuilder implements ITextBuilder {
@@ -191,6 +221,11 @@ ${comment}
   run(result: MigrationRunListResponse): string {
     return this.textBuilder.build(result, formatterMap.jira)
   }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  drift(drifts: DriftRunListResponse): string {
+    return this.textBuilder.buildDrift(drifts, formatterMap.jira)
+  }
 }
 
 class GithubTextBuilder implements ITextBuilder {
@@ -211,5 +246,9 @@ class GithubTextBuilder implements ITextBuilder {
 
   run(result: MigrationRunListResponse): string {
     return this.textBuilder.build(result, formatterMap.github)
+  }
+
+  drift(drifts: DriftRunListResponse): string {
+    return this.textBuilder.buildDrift(drifts, formatterMap.github)
   }
 }

@@ -178,15 +178,20 @@ async function runMigrationFromList(
 async function runSchemaDriftFromList(migrationConfigList: MigrationConfig[]): Promise<DriftRunListResponse> {
   const drifts: DriftExecutionResponse[] = []
   let errMsg: string | undefined
+  let hasSchemaDrifts = false
   for (const migrationConfig of migrationConfigList) {
     const drift = await atlas.drift(migrationConfig)
     if (!errMsg && drift.getError()) {
       errMsg = drift.getError()
     }
+    if (drift.getStatements().length > 0) {
+      hasSchemaDrifts = true
+    }
     drifts.push(drift)
   }
   core.info(`Schema Drift Response: ${JSON.stringify(drifts, null, 2)}`)
   return {
+    hasSchemaDrifts,
     drifts,
     errMsg
   }

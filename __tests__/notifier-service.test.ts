@@ -1,12 +1,13 @@
 /* eslint-disable jest/valid-title, @typescript-eslint/no-explicit-any, @typescript-eslint/unbound-method */
 
 import * as github from '@actions/github'
+import * as core from '@actions/core'
 import GithubClient from '../src/client/github'
 import JiraClient from '../src/client/jira'
 import { LINT_CODE_DEFAULT_PREFIXES } from '../src/constants'
 import { Platform, formatterMap } from '../src/formatting/formatters'
 import { TextBuilder } from '../src/formatting/text-builder'
-import { AtlasLintResponse, AtlasMigrationExecutionResponse } from '../src/migration/atlas-class'
+import { AtlasDriftResponse, AtlasLintResponse, AtlasMigrationExecutionResponse } from '../src/migration/atlas-class'
 import { NotifierService } from '../src/notifier.service'
 import {
   Config,
@@ -15,7 +16,8 @@ import {
   MigrationLintResponse,
   MigrationMeta,
   MigrationRunListResponse,
-  NotifyParams
+  NotifyParams,
+  DriftRunListResponse
 } from '../src/types'
 import { JiraComment, JiraIssue } from '../src/types.jira'
 import * as gha from '../src/types.gha'
@@ -49,8 +51,8 @@ jest.mock('../src/formatting/text-builder', () => {
         title: jest.fn(),
         description: jest.fn(),
         platform: {
-          jira: { run: jest.fn(), lint: jest.fn(), title: jest.fn(), description: jest.fn() },
-          github: { run: jest.fn(), lint: jest.fn(), title: jest.fn(), description: jest.fn() }
+          jira: { run: jest.fn(), lint: jest.fn(), title: jest.fn(), description: jest.fn(), drift: jest.fn() },
+          github: { run: jest.fn(), lint: jest.fn(), title: jest.fn(), description: jest.fn(), drift: jest.fn() }
         }
       }
     })
@@ -99,16 +101,11 @@ describe('NotifierService', () => {
     it('should close the PR with comment', async () => {
       mockGithubClient.closePR.mockResolvedValueOnce({ id: 12345 } as any)
 
-      const svc = new NotifierService(
-        true,
-        { number: 1 } as any,
-        {} as any,
-        {} as any,
-        mockGithubClient,
-        mockJiraClient
-      )
+      const svc = new NotifierService(true, {} as any, mockGithubClient, mockJiraClient)
 
       const result = await svc.buildGithubComment(mockTextBuilder.platform.github, {
+        pr: { number: 1 } as any,
+        migrationMeta: {} as any,
         closePR: true,
         changedFileValidation,
         migrationRunListResponse: { executionResponseList: [], migrationAvailable: false, errMsg: '' }
@@ -124,15 +121,10 @@ describe('NotifierService', () => {
       mockGithubBuilder.run.mockReturnValueOnce('run comment text')
 
       const commentBody = 'db migrate dry-run'
-      const svc = new NotifierService(
-        true,
-        { number: 1 } as any,
-        { commentId: '111', commentBody } as any,
-        {} as any,
-        mockGithubClient,
-        mockJiraClient
-      )
+      const svc = new NotifierService(true, {} as any, mockGithubClient, mockJiraClient)
       const response = await svc.buildGithubComment(mockTextBuilder.platform.github, {
+        pr: { number: 1 } as any,
+        migrationMeta: { commentId: '111', commentBody } as any,
         closePR: false,
         migrationRunListResponse: {
           migrationAvailable: true,
@@ -155,15 +147,10 @@ describe('NotifierService', () => {
     it('should call add comment', async () => {
       mockGithubClient.addComment.mockResolvedValueOnce({ id: 12345, body: 'add comment' } as any)
 
-      const svc = new NotifierService(
-        true,
-        { number: 1 } as any,
-        { eventName: 'issue_comment', actionName: 'created', triggeredBy: { login: 'user1' } } as any,
-        {} as any,
-        mockGithubClient,
-        mockJiraClient
-      )
+      const svc = new NotifierService(true, {} as any, mockGithubClient, mockJiraClient)
       const response = await svc.buildGithubComment(mockTextBuilder.platform.github, {
+        pr: { number: 1 } as any,
+        migrationMeta: { eventName: 'issue_comment', actionName: 'created', triggeredBy: { login: 'user1' } } as any,
         closePR: false,
         changedFileValidation,
         migrationRunListResponse: { executionResponseList: [], migrationAvailable: false, errMsg: '' }
@@ -180,15 +167,10 @@ describe('NotifierService', () => {
     it('should call add comment with jira ticket', async () => {
       mockGithubClient.addComment.mockResolvedValueOnce({ id: 12345, body: 'add comment' } as any)
 
-      const svc = new NotifierService(
-        true,
-        { number: 1 } as any,
-        { eventName: 'issue_comment', actionName: 'created', triggeredBy: { login: 'user1' } } as any,
-        {} as any,
-        mockGithubClient,
-        mockJiraClient
-      )
+      const svc = new NotifierService(true, {} as any, mockGithubClient, mockJiraClient)
       const response = await svc.buildGithubComment(mockTextBuilder.platform.github, {
+        pr: { number: 1 } as any,
+        migrationMeta: { eventName: 'issue_comment', actionName: 'created', triggeredBy: { login: 'user1' } } as any,
         closePR: false,
         changedFileValidation,
         jiraIssue: { key: 'KEY-1', id: '1', self: 'http://jira.com', fields: {} },
@@ -208,15 +190,10 @@ describe('NotifierService', () => {
       mockGithubBuilder.lint.mockReturnValueOnce('lint comment text')
       mockGithubBuilder.run.mockReturnValueOnce('run comment text')
 
-      const svc = new NotifierService(
-        true,
-        { number: 1 } as any,
-        { eventName: 'issue_comment', actionName: 'created', triggeredBy: { login: 'user1' } } as any,
-        {} as any,
-        mockGithubClient,
-        mockJiraClient
-      )
+      const svc = new NotifierService(true, {} as any, mockGithubClient, mockJiraClient)
       const response = await svc.buildGithubComment(mockTextBuilder.platform.github, {
+        pr: { number: 1 } as any,
+        migrationMeta: { eventName: 'issue_comment', actionName: 'created', triggeredBy: { login: 'user1' } } as any,
         closePR: false,
         addMigrationRunResponseForLint: true,
         migrationRunListResponse: {
@@ -349,14 +326,14 @@ describe('NotifierService', () => {
         it(tc.name, async () => {
           const svc = new NotifierService(
             svcArgs[0],
-            svcArgs[1],
-            svcArgs[2],
             svcArgs[3],
             mockGithubClient,
             !noJiraClient ? mockJiraClient : null
           )
 
           const result = await svc.buildJiraComment(mockTextBuilder.platform.jira, {
+            pr: svcArgs[1],
+            migrationMeta: svcArgs[2],
             changedFileValidation: cfValidation,
             migrationRunListResponse: runListResponse,
             jiraIssue: jira
@@ -376,16 +353,11 @@ describe('NotifierService', () => {
 
       const prHtmlUrl = 'http://pr.com'
 
-      const svc = new NotifierService(
-        true,
-        { number: 1, html_url: prHtmlUrl, base: { repo: { html_url: 'http://repo.com' } } } as any,
-        { ensureJiraTicket: true } as any,
-        {} as any,
-        mockGithubClient,
-        mockJiraClient
-      )
+      const svc = new NotifierService(true, {} as any, mockGithubClient, mockJiraClient)
 
       const result = await svc.buildJiraComment(mockTextBuilder.platform.jira, {
+        pr: { number: 1, html_url: prHtmlUrl, base: { repo: { html_url: 'http://repo.com' } } } as any,
+        migrationMeta: { ensureJiraTicket: true } as any,
         migrationRunListResponse: { ...migrationRunListResponse, migrationAvailable: true },
         jiraIssue: null,
         lintResponseList
@@ -400,8 +372,7 @@ describe('NotifierService', () => {
         description: 'jira comment text: some description',
         prLink: 'http://pr.com',
         prNumber: 1,
-        repoLink: 'http://repo.com',
-        title: 'some title'
+        repoLink: 'http://repo.com'
       })
     })
 
@@ -412,16 +383,11 @@ describe('NotifierService', () => {
 
       const prHtmlUrl = 'http://pr.com'
 
-      const svc = new NotifierService(
-        true,
-        { number: 1, html_url: prHtmlUrl } as any,
-        { ensureJiraTicket: true } as any,
-        {} as any,
-        mockGithubClient,
-        mockJiraClient
-      )
+      const svc = new NotifierService(true, {} as any, mockGithubClient, mockJiraClient)
 
       const result = await svc.buildJiraComment(mockTextBuilder.platform.jira, {
+        pr: { number: 1, html_url: prHtmlUrl } as any,
+        migrationMeta: { ensureJiraTicket: true } as any,
         migrationRunListResponse: { ...migrationRunListResponse, migrationAvailable: true },
         jiraIssue: undefined,
         lintResponseList
@@ -441,16 +407,11 @@ describe('NotifierService', () => {
       mockJiraBuilder.description.mockImplementationOnce((s: string) => `${s}: some description`)
       mockJiraBuilder.title.mockReturnValueOnce('some title')
 
-      const svc = new NotifierService(
-        true,
-        { number: 1, html_url: 'http://pr.com', base: { repo: { html_url: 'http://repo.com' } } } as any,
-        { ensureJiraTicket: true } as any,
-        {} as any,
-        mockGithubClient,
-        mockJiraClient
-      )
+      const svc = new NotifierService(true, {} as any, mockGithubClient, mockJiraClient)
 
       const result = await svc.buildJiraComment(mockTextBuilder.platform.jira, {
+        pr: { number: 1, html_url: 'http://pr.com', base: { repo: { html_url: 'http://repo.com' } } } as any,
+        migrationMeta: { ensureJiraTicket: true } as any,
         migrationRunListResponse: { ...migrationRunListResponse, migrationAvailable: true },
         lintResponseList,
         jiraIssue: { ...jiraIssue, fields: { ...jiraIssue.fields } }
@@ -476,8 +437,6 @@ describe('NotifierService', () => {
 
       svc = new NotifierService(
         true,
-        { number: 1, html_url: 'http://pr.com', base: { repo: { html_url: 'http://repo.com' } } } as any,
-        {} as any,
         {
           baseDirectory: 'migrations',
           databases: [{ directory: '.' }]
@@ -487,6 +446,8 @@ describe('NotifierService', () => {
       )
 
       notifyParams = {
+        pr: { number: 1, html_url: 'http://pr.com', base: { repo: { html_url: 'http://repo.com' } } } as any,
+        migrationMeta: {} as any,
         migrationRunListResponse: { ...migrationRunListResponse, migrationAvailable: true },
         lintResponseList: {
           lintResponseList: [
@@ -560,6 +521,158 @@ describe('NotifierService', () => {
           await expect(svc.notify(notifyParams)).rejects.toThrow(tc.name)
         })
       }
+    })
+  })
+
+  describe('buildDriftGithubSummary', () => {
+    beforeEach(() => {
+      core.summary.addRaw = jest.fn()
+    })
+    it('should add to summary', () => {
+      const svc = new NotifierService(false, {} as any, mockGithubClient, mockJiraClient)
+      const driftRunListResponse = {
+        hasSchemaDrifts: true,
+        drifts: [AtlasDriftResponse.fromError('some error')],
+        errMsg: 'some error'
+      }
+
+      mockGithubBuilder.drift = jest.fn().mockReturnValue('schema drift text')
+
+      const response = svc.buildDriftGithubComment(mockTextBuilder.platform.github, {
+        driftRunListResponse,
+        jiraIssue: { key: 'KEY-1', id: '1', self: 'http://jira.com', fields: {} }
+      })
+
+      const expectedSummary = `JIRA Ticket: KEY-1\r\nschema drift text`
+      expect(response).toEqual(undefined)
+      expect(mockGithubBuilder.drift).toHaveBeenCalledWith(driftRunListResponse)
+      expect(core.summary.addRaw).toHaveBeenCalledWith(expectedSummary)
+    })
+  })
+
+  describe('buildDriftJiraSummary', () => {
+    let svc: NotifierService
+    beforeEach(() => {
+      svc = new NotifierService(false, {} as any, mockGithubClient, mockJiraClient)
+      core.summary.addRaw = jest.fn()
+    })
+
+    it('should skip if jira issue is undefined', async () => {
+      const response = await svc.buildDriftJiraComment(mockJiraBuilder, {
+        driftRunListResponse: { drifts: [], hasSchemaDrifts: true }
+      })
+      expect(response).toEqual([undefined, undefined])
+    })
+    it('should skip if jira client is undefined', async () => {
+      svc = new NotifierService(false, {} as any, mockGithubClient, null)
+      const response = await svc.buildDriftJiraComment(mockJiraBuilder, {
+        driftRunListResponse: { drifts: [], hasSchemaDrifts: true }
+      })
+      expect(response).toEqual([undefined, undefined])
+    })
+    it('should skip if jira description is same as current drift', async () => {
+      const jiraDescription = 'statement: drop index a;'
+      const jiraIssue: JiraIssue = {
+        key: 'KEY-1',
+        id: '1',
+        self: 'http://jira.com',
+        fields: {
+          description: jiraDescription
+        }
+      }
+      mockJiraBuilder.drift = jest.fn().mockReturnValue(jiraDescription)
+
+      const driftRunListResponse: DriftRunListResponse = {
+        drifts: [AtlasDriftResponse.build('-- comment\ndrop index a;')],
+        hasSchemaDrifts: true
+      }
+
+      const response = await svc.buildDriftJiraComment(mockJiraBuilder, { driftRunListResponse, jiraIssue })
+      expect(response).toEqual([jiraIssue, undefined])
+    })
+
+    it('should create a new ticket', async () => {
+      const jiraDescription = 'statement: drop index a;'
+      const jiraIssue: JiraIssue = {
+        key: 'KEY-1',
+        id: '1',
+        self: 'http://jira.com',
+        fields: {
+          description: jiraDescription
+        }
+      }
+
+      mockJiraBuilder.drift = jest.fn().mockReturnValue(jiraDescription)
+      mockJiraClient.createIssue = jest.fn().mockResolvedValue(jiraIssue)
+      mockJiraClient.addComment = jest.fn().mockRejectedValue(new Error('AddComment should not have been called'))
+
+      const driftRunListResponse: DriftRunListResponse = {
+        drifts: [AtlasDriftResponse.build('-- comment\ndrop index a;')],
+        hasSchemaDrifts: true
+      }
+
+      const response = await svc.buildDriftJiraComment(mockJiraBuilder, { driftRunListResponse, jiraIssue: null })
+
+      expect(response).toEqual([jiraIssue, undefined])
+      expect(mockJiraClient.createIssue).toHaveBeenCalledWith({
+        description: jiraDescription,
+        repoLink: '',
+        isSchemaDrift: true
+      })
+    })
+
+    it('should create a new comment in already existing jira ticket ', async () => {
+      const jiraDescription = 'statement: drop index a;'
+      const jiraIssue: JiraIssue = {
+        key: 'KEY-1',
+        id: '1',
+        self: 'http://jira.com',
+        fields: {
+          description: `${jiraDescription}some change`
+        }
+      }
+      const jiraComment = { id: '123', self: 'http:/jira.com', body: 'comment' }
+
+      mockJiraBuilder.drift = jest.fn().mockReturnValue(jiraDescription)
+      mockJiraClient.createIssue = jest.fn().mockRejectedValue(new Error('CreateIssue should not have been called'))
+      mockJiraClient.addComment = jest.fn().mockResolvedValue(jiraComment)
+
+      const driftRunListResponse: DriftRunListResponse = {
+        drifts: [AtlasDriftResponse.build('-- comment\ndrop index a;')],
+        hasSchemaDrifts: true
+      }
+
+      const response = await svc.buildDriftJiraComment(mockJiraBuilder, { driftRunListResponse, jiraIssue })
+
+      expect(response).toEqual([jiraIssue, jiraComment])
+      expect(mockJiraClient.addComment).toHaveBeenCalledWith(jiraIssue.id, jiraDescription)
+    })
+  })
+
+  describe('drift', () => {
+    const svc = new NotifierService(
+      false,
+      {
+        baseDirectory: './migrations',
+        databases: [{ directory: '.', envName: 'DB_CONN' }]
+      } as any,
+      mockGithubClient,
+      null
+    )
+
+    it('should run', async () => {
+      core.summary.write = jest.fn()
+
+      const response = await svc.drift({
+        driftRunListResponse: { drifts: [], hasSchemaDrifts: true },
+        jiraIssue: undefined
+      })
+
+      expect(response).toEqual({
+        jiraIssue: undefined,
+        jiraComment: undefined
+      })
+      expect(core.summary.write).toHaveBeenCalled()
     })
   })
 })

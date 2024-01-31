@@ -331,7 +331,7 @@ export type DriftStatement = {
  * Drift detection is the process of identifying differences between the database schema in the
  * migration files and the actual schema in the database.
  */
-export class DriftResponse implements DriftExecutionResponse {
+export class AtlasDriftResponse implements DriftExecutionResponse {
   private statements: DriftStatement[]
   private error?: string
 
@@ -339,14 +339,14 @@ export class DriftResponse implements DriftExecutionResponse {
     this.statements = statements
   }
 
-  static fromError(error: string): DriftResponse {
-    const drift = new DriftResponse([])
+  static fromError(error: string): AtlasDriftResponse {
+    const drift = new AtlasDriftResponse([])
     drift.error = error
     return drift
   }
 
   /**
-   * Builds a DriftResponse object from the given response string.
+   * Builds a AtlasDriftResponse object from the given response string.
    * The response string is expected to be a series of SQL commands, each ending with a semicolon.
    * Comments are lines that start with '--'.
    *
@@ -357,12 +357,12 @@ export class DriftResponse implements DriftExecutionResponse {
    *   ALTER TABLE old_table ADD COLUMN new_column INT;"
    *
    * @param {string} response - The response string to parse.
-   * @returns {DriftResponse} - The built DriftResponse object.
+   * @returns {AtlasDriftResponse} - The built AtlasDriftResponse object.
    */
-  static build(response: string): DriftResponse {
+  static build(response: string): AtlasDriftResponse {
     const responseCopy = (response || '').trim()
     if (!responseCopy || responseCopy === ATLAS_NO_DRIFT_STR) {
-      return new DriftResponse([])
+      return new AtlasDriftResponse([])
     }
     const lines = responseCopy.split('\n')
 
@@ -383,7 +383,7 @@ export class DriftResponse implements DriftExecutionResponse {
             command;
             some other unwanted text; // no comment for this one
             */
-            return DriftResponse.fromError(response)
+            return AtlasDriftResponse.fromError(response)
           }
           statements.push({
             comment,
@@ -397,9 +397,9 @@ export class DriftResponse implements DriftExecutionResponse {
 
     // Capture response string that does not contain any ';'
     if (statements.length === 0 && response) {
-      return DriftResponse.fromError(response)
+      return AtlasDriftResponse.fromError(response)
     }
-    return new DriftResponse(statements)
+    return new AtlasDriftResponse(statements)
   }
 
   /**

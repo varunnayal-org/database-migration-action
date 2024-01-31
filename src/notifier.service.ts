@@ -3,9 +3,10 @@ import { TextBuilder } from './formatting/text-builder'
 import { getDirectoryForDb } from './migration/migration'
 import {
   Config,
+  DriftParams,
+  DriftResponse,
   GithubNotifyResponse,
   ITextBuilder,
-  MigrationMeta,
   Notifier,
   NotifyParams,
   NotifyResponse
@@ -16,23 +17,12 @@ import { formatterMap } from './formatting/formatters'
 
 export class NotifierService implements Notifier {
   #dryRun: boolean
-  #pr: gha.PullRequest
-  #migrationMeta: MigrationMeta
   #config: Config
   #ghClient: gha.GHClient
   #jiraClient: JiraClient | null
 
-  constructor(
-    dryRun: boolean,
-    pr: gha.PullRequest,
-    migrationMeta: MigrationMeta,
-    config: Config,
-    ghClient: gha.GHClient,
-    jiraClient: JiraClient | null
-  ) {
+  constructor(dryRun: boolean, config: Config, ghClient: gha.GHClient, jiraClient: JiraClient | null) {
     this.#dryRun = dryRun
-    this.#pr = pr
-    this.#migrationMeta = migrationMeta
     this.#config = config
     this.#ghClient = ghClient
     this.#jiraClient = jiraClient
@@ -63,11 +53,11 @@ Unmatched Files:
 
     let ghCommentPromise: Promise<GithubNotifyResponse>
     if (params.closePR === true) {
-      ghCommentPromise = this.#ghClient.closePR(this.#pr.number, githubSummaryText)
-    } else if ('commentId' in this.#migrationMeta) {
+      ghCommentPromise = this.#ghClient.closePR(params.pr.number, githubSummaryText)
+    } else if ('commentId' in params.migrationMeta) {
       ghCommentPromise = this.#ghClient.updateComment(
-        this.#migrationMeta.commentId,
-        `${this.#migrationMeta.commentBody}\r\n\r\n${githubSummaryText}`
+        params.migrationMeta.commentId,
+        `${params.migrationMeta.commentBody}\r\n\r\n${githubSummaryText}`
       )
     } else {
       let jiraTicket = ''
@@ -76,10 +66,10 @@ Unmatched Files:
       }
 
       ghCommentPromise = this.#ghClient.addComment(
-        this.#pr.number,
-        `Executed By: ${formatterMap.github.userRef(this.#migrationMeta.triggeredBy.login)}\r\nReason: ${
-          this.#migrationMeta.eventName
-        }.${this.#migrationMeta.actionName}${jiraTicket}\r\n${githubSummaryText}`
+        params.pr.number,
+        `Executed By: ${formatterMap.github.userRef(params.migrationMeta.triggeredBy.login)}\r\nReason: ${
+          params.migrationMeta.eventName
+        }.${params.migrationMeta.actionName}${jiraTicket}\r\n${githubSummaryText}`
       )
     }
     return ghCommentPromise
@@ -106,7 +96,7 @@ Unmatched Files:
       this.#dryRun === false ||
       !!(
         !params.changedFileValidation &&
-        this.#migrationMeta.ensureJiraTicket &&
+        params.migrationMeta.ensureJiraTicket &&
         params.migrationRunListResponse.migrationAvailable &&
         (!params.migrationRunListResponse.errMsg || params.jiraIssue)
       )
@@ -118,7 +108,7 @@ Unmatched Files:
     }
 
     if (jiraIssue === undefined) {
-      jiraIssue = await this.#jiraClient.findIssue(this.#pr.html_url)
+      jiraIssue = await this.#jiraClient.findIssue(params.pr.html_url)
     }
 
     const issueComment = this.#buildSummary(builder, params)
@@ -131,11 +121,10 @@ Unmatched Files:
       jiraIssuePromise = Promise.resolve(jiraIssue)
     } else {
       jiraIssuePromise = this.#jiraClient.createIssue({
-        title: builder.title(this.#config.serviceName),
         description: builder.description(issueComment),
-        prLink: this.#pr.html_url,
-        repoLink: this.#pr.base.repo.html_url,
-        prNumber: this.#pr.number
+        prLink: params.pr.html_url,
+        repoLink: params.pr.base.repo.html_url,
+        prNumber: params.pr.number
       })
     }
 
@@ -145,8 +134,8 @@ Unmatched Files:
   async notify(params: NotifyParams): Promise<NotifyResponse> {
     const builder = new TextBuilder(
       this.#dryRun,
-      this.#pr.html_url,
-      this.#pr.base.repo.html_url,
+      params.pr.html_url,
+      params.pr.base.repo.html_url,
       this.#config.databases.map(db => getDirectoryForDb(this.#config.baseDirectory, db))
     )
 
@@ -167,6 +156,72 @@ Unmatched Files:
     return {
       githubComment: response[0].value,
       jiraIssue: params.jiraIssue,
+      jiraComment
+    }
+  }
+
+  async buildDriftJiraComment(
+    builder: ITextBuilder,
+    params: DriftParams
+  ): Promise<[JiraIssue | undefined, JiraComment | undefined]> {
+    const jiraIssue = params.jiraIssue
+
+    if (jiraIssue === undefined) {
+      return Promise.resolve([undefined, undefined])
+    }
+
+    const jiraDescription = builder.drift(params.driftRunListResponse)
+
+    // If we already have a JIRA ticket for drift with the same description.
+    // depicts no action was taken by service team b/w multiple invocation of this action.
+    if (!this.#jiraClient || (jiraIssue !== null && jiraIssue.fields.description === jiraDescription)) {
+      return Promise.resolve([jiraIssue || undefined, undefined])
+    }
+
+    let jiraIssuePromise: Promise<JiraIssue | undefined>
+    let jiraCommentPromise: Promise<JiraComment | undefined>
+
+    if (jiraIssue) {
+      jiraIssuePromise = Promise.resolve(jiraIssue)
+      jiraCommentPromise = this.#jiraClient.addComment(jiraIssue.id, jiraDescription)
+    } else {
+      jiraIssuePromise = this.#jiraClient.createIssue({
+        description: jiraDescription,
+        repoLink: params.repo?.html_url || '',
+        isSchemaDrift: true
+      })
+      jiraCommentPromise = Promise.resolve(undefined)
+    }
+
+    return [await jiraIssuePromise, await jiraCommentPromise]
+  }
+
+  buildDriftGithubComment(builder: ITextBuilder, params: DriftParams): void {
+    let summary = builder.drift(params.driftRunListResponse)
+    if (params.jiraIssue) {
+      summary = summary = `JIRA Ticket: ${params.jiraIssue.key}\r\n${summary}`
+    }
+
+    core.summary.addRaw(summary)
+  }
+
+  async drift(params: DriftParams): Promise<DriftResponse> {
+    const builder = new TextBuilder(
+      this.#dryRun,
+      '',
+      params.repo?.html_url || '', // TODO: Pass it
+      this.#config.databases.map(db => getDirectoryForDb(this.#config.baseDirectory, db))
+    )
+
+    const [jiraIssue, jiraComment] = await this.buildDriftJiraComment(builder.platform.jira, params)
+    params.jiraIssue = jiraIssue
+
+    this.buildDriftGithubComment(builder.platform.github, params)
+
+    await core.summary.write()
+
+    return {
+      jiraIssue,
       jiraComment
     }
   }

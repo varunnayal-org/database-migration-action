@@ -7,12 +7,14 @@ import {
   ContextPullRequest,
   ContextPullRequestComment,
   ContextPullRequestReview,
+  ContextSchedule,
   PullRequest,
   PullRequestCommentPayload,
   PullRequestPayload,
   PullRequestReviewPayload,
   Repository,
   Review,
+  SchedulePayload,
   User
 } from '../src/types.gha'
 import { TEMP_DIR_FOR_MIGRATION } from '../src/constants'
@@ -514,6 +516,18 @@ export function getPRCommentContext(payload: PullRequestCommentPayload): Context
   return {
     payload,
     eventName: 'issue_comment',
+    sha: 'abcdefgh',
+    ref: 'feature-init',
+    workflow: '1111',
+    runId: 2222,
+    runNumber: 1
+  }
+}
+
+export function getScheduleContext(payload: SchedulePayload): ContextSchedule {
+  return {
+    payload,
+    eventName: 'schedule',
     sha: 'abcdefgh',
     ref: 'feature-init',
     workflow: '1111',

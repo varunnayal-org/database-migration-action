@@ -8,6 +8,8 @@ export const DEFAULT_MIGRATION_CHILD_DIR = '.'
 export const DEFAULT_PR_LABEL = 'db-migration'
 export const DEFAULT_PR_JIRA_TICKET_LABEL = 'jira-ticket-created'
 export const DEFAULT_JIRA_ISSUE_TYPE = 'Story'
+export const DEFAULT_JIRA_SCHEMA_DRIFT_ISSUE_TYPE = 'Bug'
+export const DEFAULT_JIRA_SCHEMA_DRIFT_LABEL = 'db-schema-drift'
 export const DEFAULT_JIRA_COMPLETED_STATUS = 'Done'
 export const DEFAULT_JIRA_DRI_APPROVAL_STATUS = 'DONE'
 

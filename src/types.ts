@@ -8,7 +8,8 @@ import {
   GHClient,
   IssueCreateCommentResponse,
   IssueUpdateCommentResponse,
-  PullRequestUpdateResponse
+  PullRequestUpdateResponse,
+  Repository
 } from './types.gha'
 import { VaultClient } from './client/vault/types'
 
@@ -168,6 +169,11 @@ export interface MigrationRunListResponse {
  * Represents the response from drift operations.
  */
 export interface DriftRunListResponse {
+  /**
+   * Specifies whether schema drift exists
+   */
+  hasSchemaDrifts: boolean
+
   /**
    * An array of drift execution responses.
    */
@@ -463,6 +469,15 @@ export interface ITextBuilder {
   run(result: MigrationRunListResponse): string
 
   /**
+   * Takes DriftRunListResponse and returns a string.
+   * This method is used to process drift execution results
+   *
+   * @param {DriftRunListResponse} drifts - Drift execution result
+   * @returns {string} - A string representation of the drifting result
+   */
+  drift(drifts: DriftRunListResponse): string
+
+  /**
    * Takes a prefix string and returns a string.
    * This method is used to set a title.
    *
@@ -682,6 +697,10 @@ export type NotifyResponse = {
  * Represents the parameters for a notification operation.
  */
 export type NotifyParams = {
+  pr: PullRequest
+
+  migrationMeta: MigrationMeta
+
   /**
    * The response from a migration run list operation.
    */
@@ -713,8 +732,35 @@ export type NotifyParams = {
   closePR?: boolean
 }
 
+export type DriftParams = {
+  /**
+   * Drift execution response
+   */
+  driftRunListResponse: DriftRunListResponse
+
+  /**
+   * An optional jira issue associated with the drift error
+   */
+  jiraIssue?: JiraIssue | null | undefined
+
+  repo?: Repository
+}
+
+export type DriftResponse = {
+  /**
+   * An optional Jira issue associated with the schema drift.
+   */
+  jiraIssue?: JiraIssue
+
+  /**
+   * An optional Jira comment associated with the schema drift.
+   */
+  jiraComment?: JiraComment
+}
+
 export interface Notifier {
   notify(params: NotifyParams): Promise<NotifyResponse>
+  drift(drifts: DriftParams): Promise<DriftResponse>
 }
 
 export interface Builder {
@@ -755,8 +801,6 @@ export interface Builder {
    * `getNotifier` is a method in the `factory.ts` file.
    *
    * @param dryRun - A boolean indicating whether the notifier service should run in dry run mode.
-   * @param pr - A `PullRequest` object representing the pull request.
-   * @param migrationMeta - A `MigrationMeta` object representing the migration metadata.
    * @param config - A `Config` object representing the configuration.
    * @param ghClient - A `GHClient` object representing the GitHub client.
    * @param jiraClient - A `JiraClient` object or null representing the Jira client.
@@ -765,12 +809,5 @@ export interface Builder {
    *
    * This method is used to create a new `NotifierService` object with the specified parameters.
    */
-  getNotifier(
-    dryRun: boolean,
-    pr: PullRequest,
-    migrationMeta: MigrationMeta,
-    config: Config,
-    ghClient: GHClient,
-    jiraClient: JiraClient | null
-  ): Notifier
+  getNotifier(dryRun: boolean, config: Config, ghClient: GHClient, jiraClient: JiraClient | null): Notifier
 }
