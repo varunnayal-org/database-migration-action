@@ -539,6 +539,7 @@ describe('NotifierService', () => {
       mockGithubBuilder.drift = jest.fn().mockReturnValue('schema drift text')
 
       const response = svc.buildDriftGithubComment(mockTextBuilder.platform.github, {
+        repo: c.getRepo(),
         driftRunListResponse,
         jiraIssue: { key: 'KEY-1', id: '1', self: 'http://jira.com', fields: {} }
       })
@@ -552,13 +553,16 @@ describe('NotifierService', () => {
 
   describe('buildDriftJiraSummary', () => {
     let svc: NotifierService
+    let repo: gha.Repository
     beforeEach(() => {
       svc = new NotifierService(false, {} as any, mockGithubClient, mockJiraClient)
+      repo = c.getRepo()
       core.summary.addRaw = jest.fn()
     })
 
     it('should skip if jira issue is undefined', async () => {
       const response = await svc.buildDriftJiraComment(mockJiraBuilder, {
+        repo,
         driftRunListResponse: { drifts: [], hasSchemaDrifts: true }
       })
       expect(response).toEqual([undefined, undefined])
@@ -566,6 +570,7 @@ describe('NotifierService', () => {
     it('should skip if jira client is undefined', async () => {
       svc = new NotifierService(false, {} as any, mockGithubClient, null)
       const response = await svc.buildDriftJiraComment(mockJiraBuilder, {
+        repo,
         driftRunListResponse: { drifts: [], hasSchemaDrifts: true }
       })
       expect(response).toEqual([undefined, undefined])
@@ -587,7 +592,7 @@ describe('NotifierService', () => {
         hasSchemaDrifts: true
       }
 
-      const response = await svc.buildDriftJiraComment(mockJiraBuilder, { driftRunListResponse, jiraIssue })
+      const response = await svc.buildDriftJiraComment(mockJiraBuilder, { driftRunListResponse, repo, jiraIssue })
       expect(response).toEqual([jiraIssue, undefined])
     })
 
@@ -611,12 +616,12 @@ describe('NotifierService', () => {
         hasSchemaDrifts: true
       }
 
-      const response = await svc.buildDriftJiraComment(mockJiraBuilder, { driftRunListResponse, jiraIssue: null })
+      const response = await svc.buildDriftJiraComment(mockJiraBuilder, { driftRunListResponse, repo, jiraIssue: null })
 
       expect(response).toEqual([jiraIssue, undefined])
       expect(mockJiraClient.createIssue).toHaveBeenCalledWith({
         description: jiraDescription,
-        repoLink: '',
+        repoLink: repo.html_url,
         isSchemaDrift: true
       })
     })
@@ -642,7 +647,7 @@ describe('NotifierService', () => {
         hasSchemaDrifts: true
       }
 
-      const response = await svc.buildDriftJiraComment(mockJiraBuilder, { driftRunListResponse, jiraIssue })
+      const response = await svc.buildDriftJiraComment(mockJiraBuilder, { driftRunListResponse, repo, jiraIssue })
 
       expect(response).toEqual([jiraIssue, jiraComment])
       expect(mockJiraClient.addComment).toHaveBeenCalledWith(jiraIssue.id, jiraDescription)
@@ -665,6 +670,7 @@ describe('NotifierService', () => {
 
       const response = await svc.drift({
         driftRunListResponse: { drifts: [], hasSchemaDrifts: true },
+        repo: c.getRepo(),
         jiraIssue: undefined
       })
 

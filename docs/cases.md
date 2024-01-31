@@ -3,6 +3,8 @@
 - [Cases](#cases)
   - [Auto close PR](#auto-close-pr)
   - [Manual Migration](#manual-migration)
+    - [Repository access available](#repository-access-available)
+    - [Repository access not available](#repository-access-not-available)
   - [Out of order Execution](#out-of-order-execution)
   - [Lock and timeouts](#lock-and-timeouts)
   - [Drop index concurrently issue](#drop-index-concurrently-issue)
@@ -41,16 +43,49 @@ There might be cases where we have to deal with scenarios where
 - We need to capture schema changes in our repository but don't want to run them. This situation might arise when we fix [schema drifts](./schema-drift.md)
 - If DBA runs the migrations explicitly(they already know connection string) that are already raised in a PR. Developer from service team should help them out.
 
-In these scenarios, DBA should capture the schema migration in the `atlas_schema_revisions` table.
+Once the revision has been resolved, if there exist more revisions that has not been executed explicitly, use `db migrate` flow.
+
+To resolve the manually executed revisions, DBA should capture the schema migration in the `atlas_schema_revisions` table. There are two ways based on the situation where repository access is available to DBA
+
+### Repository access available
+
+Suppose there are multiple version files present in the migrations directory, say
+
+- 20240131184838_user.sql
+- 20240131180053_config_id_index.sql
+
+and we have already applied the schema manually in above revision files.
+
+So, in order to consider all migrations upto `20240131180053_config_id_index.sql`, DBA should run following atlas command:
+
+```sh
+cd /path/to/repository
+git checkout {branch-to-checkout}
+
+# version format {timestamp}_{description}.sql
+VERSION=20240131180053
+DIR=`pwd`/migrations-directory
+CONN_URL="postgres://{user}:{pass}//{prod-db-host}:{port}/{db}?search_path={db-schema-name}"
+
+atlas migrate set --url "${CONN_URL}" --dir file://${DIR} 20240131180053
+```
+
+In case we have manually executed commands till `20240131184838_user.sql` version, then change `VERSION` to `20240131184838` in above query
+
+### Repository access not available
 
 - The schema file is in format `{revision}_{description}.sql`. Consider the file `20231207062947_add_phone.sql` for which we want to capture it in schema w/o running the migrations. DBA will run following query:
-  - `applied` and `total` should be set to same non zero positive value. Set to `1` here.
+  - `applied` and `total` set to 0.
   - `hash` should be the one calculated by `atlas`. But in this case it doesn't matter as `applied` and `total` are set to same value.
+  - `type` is set to 4 that specifies RevisionTypeResolved in atlas.
 
   ```sql
-  INSERT INTO atlas_schema_revisions(version,description,type,applied,total,executed_at,execution_time,hash,operator_version)
-  VALUES ('20231207062947', 'add_phone', 2, 1, 1, now(), 1, '', 'Atlas CLI v0.18.0');
+  INSERT INTO
+  atlas_schema_revisions(version, description,        type, applied, total, executed_at, execution_time, error,  error_stmt,hash, partial_hashes, operator_version)
+  VALUES                ('20231207062947', 'add_phone', 4,     0,      0,      now(),      0,               '','',             '','null', 'Atlas CLI v0.18.0');
   ```
+
+  Do this for all the migrations file that were executed manually.
 
 - If this is the only file in the PR or the last pending file in the migration files(considering previous one has been executed), then we can safely merge the PR
   - Else, use `db migrate` command.
@@ -78,7 +113,7 @@ Same has been raised with atlas
 - Issue: [#2375](https://github.com/ariga/atlas/issues/2375)
 - PR : [PR#2376](https://github.com/ariga/atlas/pull/2376)
 
-Should be fixed with next version of atlas, probably v0.16.0.
+This will be fixed in next version of atlas i.e. v0.16.0
 
 ## Database is not clean
 

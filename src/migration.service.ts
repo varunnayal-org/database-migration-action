@@ -469,7 +469,7 @@ export default class MigrationService {
   async processDrift(event: gha.ContextSchedule): Promise<any> {
     const { payload, eventName } = event
     if (eventName !== 'schedule') {
-      return this.skipProcessingHandler(eventName, { action: payload.action || 'na' })
+      return this.skipProcessingHandler(eventName, { action: payload.schedule })
     }
 
     const secretMap = await this.#secretClient.getSecrets(this.#config.dbSecretNameList)
@@ -493,7 +493,11 @@ export default class MigrationService {
 
     const notifier = this.#factory.getNotifier(false, this.#config, this.#ghClient, null)
 
-    const driftResponse = await notifier.drift({ driftRunListResponse, jiraIssue })
+    const driftResponse = await notifier.drift({
+      driftRunListResponse,
+      repo: payload.repository,
+      jiraIssue
+    })
 
     return {
       driftRunListResponse,

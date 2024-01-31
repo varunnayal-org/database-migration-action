@@ -146,7 +146,9 @@ export interface PullRequestCommentPayload {
 }
 
 export interface SchedulePayload {
-  action: string
+  schedule: string
+  organization: Organization
+  repository: Repository
 }
 
 export type ContextPullRequestReview = GithubContext<PullRequestReviewPayload, EventNamePullRequestReview>

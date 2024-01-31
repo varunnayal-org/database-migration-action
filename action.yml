@@ -132,14 +132,6 @@ runs:
       if: (steps.checks.outputs.can_execute == '1' && steps.cache-atlas.outputs.cache-hit != 'true')
       run: curl -sSf https://atlasgo.sh | ATLAS_VERSION=${{inputs.atlas_version}} CI=true sh -s -- --community
 
-    # TODO: Remove this
-    - name: run1
-      shell: bash
-      run: |
-        ls -ltrha migrations
-        ls -ltrha migrations/mg1
-        ls -ltrha migrations/mg2
-
     - name: setup_node
       uses: actions/setup-node@v4
       if: steps.checks.outputs.can_execute == '1'

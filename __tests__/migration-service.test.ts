@@ -2,7 +2,7 @@
 
 import * as core from '@actions/core'
 import { VaultClient } from '../src/client/vault/types'
-import { GHClient, PullRequest } from '../src/types.gha'
+import { ContextSchedule, GHClient, PullRequest } from '../src/types.gha'
 import { JiraClient, JiraIssue, Config as JIRAConfig } from '../src/types.jira'
 import { Builder, Config, MigrationLintResponse, MigrationMeta, Notifier, NotifyResponse } from '../src/types'
 import MigrationService from '../src/migration.service'
@@ -929,6 +929,10 @@ describe('migration service', () => {
   })
 
   describe('processDrift', () => {
+    let scheduleContext: ContextSchedule
+    beforeEach(() => {
+      scheduleContext = c.getScheduleContext(c.getSchedulePayload())
+    })
     // !driftRunListResponse.errMsg && driftRunListResponse.hasSchemaDrifts === false
     it('should have no schema drifts', async () => {
       const svc = getSvc()
@@ -938,11 +942,7 @@ describe('migration service', () => {
       })
       mockM('runSchemaDriftFromList', driftRunListResponse)
 
-      const response = await svc.processDrift(
-        c.getScheduleContext({
-          action: 'cron'
-        })
-      )
+      const response = await svc.processDrift(scheduleContext)
 
       expect(response).toEqual({ driftRunListResponse })
     })
@@ -955,14 +955,16 @@ describe('migration service', () => {
       mockM('runSchemaDriftFromList', driftRunListResponse)
       svc.skipProcessingHandler = jest.fn()
 
-      const contextSchedule = c.getScheduleContext({ action: 'cron' }) as any
+      const payload = c.getSchedulePayload()
+      const contextSchedule = c.getScheduleContext(payload) as any
       contextSchedule.eventName = 'invalid_event'
 
       const response = await svc.processDrift(contextSchedule)
 
       expect(response).toEqual(undefined)
-      expect(svc.skipProcessingHandler).toHaveBeenCalledWith('invalid_event', { action: 'cron' })
+      expect(svc.skipProcessingHandler).toHaveBeenCalledWith('invalid_event', { action: payload.schedule })
     })
+
     // notifier.drift
     it('should have drifts', async () => {
       const svc = getSvc()
@@ -976,16 +978,16 @@ describe('migration service', () => {
       notifier.drift = jest.fn().mockResolvedValue({ jiraIssue, jiraComment: undefined })
       mockM('runSchemaDriftFromList', driftRunListResponse)
 
-      const response = await svc.processDrift(
-        c.getScheduleContext({
-          action: 'cron'
-        })
-      )
+      const response = await svc.processDrift(scheduleContext)
 
       expect(response).toEqual({ driftRunListResponse, jiraIssue, jiraComment: undefined })
       expect(jiraClient.findSchemaDriftIssue).toHaveBeenCalledTimes(1)
       expect(jiraClient.findSchemaDriftIssue).toHaveBeenCalledWith(config.serviceName, config.jira?.doneValue)
-      expect(notifier.drift).toHaveBeenCalledWith({ driftRunListResponse, jiraIssue })
+      expect(notifier.drift).toHaveBeenCalledWith({
+        driftRunListResponse,
+        jiraIssue,
+        repo: scheduleContext.payload.repository
+      })
     })
 
     it('should have drifts without jira integration', async () => {
@@ -999,14 +1001,14 @@ describe('migration service', () => {
       mockM('runSchemaDriftFromList', driftRunListResponse)
 
       const svc = getSvc({ jiraConfig: null })
-      const response = await svc.processDrift(
-        c.getScheduleContext({
-          action: 'cron'
-        })
-      )
+      const response = await svc.processDrift(scheduleContext)
 
       expect(response).toEqual({ driftRunListResponse, jiraIssue, jiraComment: undefined })
-      expect(notifier.drift).toHaveBeenCalledWith({ driftRunListResponse, jiraIssue })
+      expect(notifier.drift).toHaveBeenCalledWith({
+        driftRunListResponse,
+        jiraIssue,
+        repo: scheduleContext.payload.repository
+      })
     })
   })
 })

@@ -743,7 +743,7 @@ export type DriftParams = {
    */
   jiraIssue?: JiraIssue | null | undefined
 
-  repo?: Repository
+  repo: Repository
 }
 
 export type DriftResponse = {

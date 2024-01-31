@@ -153,17 +153,50 @@ Use [nektos/act](https://github.com/nektos/act) to run actions.
       -e /path/to/sample/pr-comment.json
     ```
 
+1. To test schedule run
+
+    ```sh
+    act schedule -v \
+      -j db-migration-approval-flow \
+      --var-file $ENV_FILE \
+      --env-file $ENV_FILE \
+      --secret-file $ENV_FILE \
+      -e /path/to/sample/schedule-event.json
+    ```
+
 ## Debugging
 
-If you get error `Error: Cannot find module '***/database-migration-action/dist/index.js'`, ensure
+- `Error: Cannot find module '***/database-migration-action/dist/index.js`
+  
+  For this ensure,
+  - `database-migration-action` is not in `.gitignore`
+  - Checkout action has been added as mentioned above
 
-- `database-migration-action` is not in `.gitignore`
-- Checkout action has been added as mentioned above
+    ```yaml
+    ...
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v3
+    ...
+    ```
 
-  ```yaml
-  ...
-  steps:
-    - name: checkout repo
-      uses: actions/checkout@v3
-  ...
+- `Bind for 0.0.0.0:5432 failed: port is already allocated`
+  
+  The main workflow file usually has [postgres container service](https://docs.github.com/en/actions/using-containerized-services/creating-postgresql-service-containers) attached to serve as [atlas's dev database](https://atlasgo.io/concepts/dev-database). There are high chances that it's binding to host port `5432`(or other port) and host might already have postgres running for other purpose.
+
+  To run it, change it to one that host is not using. Also ensure to update `dev_db_url` parameter to this action.
+
+- `spawn atlas ENOENT`
+
+  [action.yml](../action.yml) script installs [atlas](https://github.com/ariga/atlas) when used in a workflow.
+  For local testing, we directly execute `dist/index.js` file from parent workflow, hence the environment does not contain atlas binary. For this we can store it locally and refer to it.
+
+  Install atlas locally in `{service-repository}/database-migration-action` using command
+  
+  ```sh
+  ATLAS_VERSION=v0.18.0;
+  curl -L -o "atlas" --fail "-#" "https://release.ariga.io/atlas/atlas-community-linux-arm64-${ATLAS_VERSION}" && \
+    chmod +x atlas
   ```
+
+  Then in [atlas.ts](../src/migration/atlas.ts) file, set `ATLAS_BINARY` to `'./database-migration-action/atlas'`.

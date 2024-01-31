@@ -30,26 +30,20 @@ Flow diagram: [flow.puml](./docs/diagrams/flow.puml)
    1. When PR is either opened, reopened or synchronized
    1. When PR is approved
    1. When a comment is added on PR
+1. Capture schema drifts and create JIRA ticket
 
 ## Todo
 
 - [ ] Schedule migrations
 - [ ] Single repository multi deployment
+- [ ] Test for
+  - [x] PostgreSQL
+  - [ ] MySQL
 
 ### Action Items
 
 - [x] JIRA integration for approval
-- [x] Do not allow drop commands (Mention in Dev SOP). Can we use linters?
-  - Can be handled using `atlas.hcl` file with configuration([issue](./docs/cases.md#drop-index-concurrently-issue))
-
-    ```hcl
-    lint {
-      destructive {
-        error = true
-      }
-    }
-    ```
-
+- [x] Do not allow drop commands (Mention in Dev SOP). See [linting](./docs/linting.md).
   - [x] Allow skipping of certain lint rules per PR basis: check [lint bypass checks](./docs/linting.md#bypass-checks)
 - [x] Users belonging to particular team defined in configuration can run migration
 - [ ] DBA SOP

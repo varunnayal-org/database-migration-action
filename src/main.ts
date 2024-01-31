@@ -53,6 +53,7 @@ export async function run(): Promise<void> {
       throw response[0].reason
     }
   } else {
-    migrator.skipProcessingHandler(eventName, event.payload || { action: 'na' })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    migrator.skipProcessingHandler(eventName, (event.payload as any) || { action: 'na' })
   }
 }

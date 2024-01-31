@@ -433,6 +433,16 @@ export function getReview(reviewUser: string, id = 1111111): Review {
   }
 }
 
+export function getSchedulePayload(): SchedulePayload {
+  return {
+    schedule: '10 1 * * *',
+    organization: {
+      login: 'my-org'
+    },
+    repository: getRepo()
+  }
+}
+
 export const prCreated: PullRequestPayload = {
   action: 'opened',
   number: 1,

@@ -209,7 +209,7 @@ Unmatched Files:
     const builder = new TextBuilder(
       this.#dryRun,
       '',
-      params.repo?.html_url || '', // TODO: Pass it
+      params.repo.html_url,
       this.#config.databases.map(db => getDirectoryForDb(this.#config.baseDirectory, db))
     )
 

@@ -6,6 +6,9 @@ import { ATLAS_CONFIG_FILE_NAME, ATLAS_HCL } from '../constants'
 
 process.env.ATLAS_NO_UPDATE_NOTIFIER = '0'
 
+const ATLAS_BINARY = 'atlas'
+// const ATLAS_BINARY = './database-migration-action/atlas'
+
 function getDirArg(dirName: string): string {
   return `file://${dirName}`
 }
@@ -17,7 +20,7 @@ function getAtlasHCLFileArgs(dirName: string): string {
 
 async function hash(dir: string): Promise<void> {
   core.debug('Hashing migrations')
-  await util.exec('atlas', ['migrate', 'hash', '--dir', getDirArg(dir)])
+  await util.exec(ATLAS_BINARY, ['migrate', 'hash', '--dir', getDirArg(dir)])
 }
 
 function getAtlasHCLFile(): [string, string] {
@@ -45,8 +48,8 @@ async function lint(
       '--dev-url',
       migrationConfig.devUrl
     ]
-    core.debug(`Linting for directory ${migrationConfig.dir}`)
-    const response = await util.exec('atlas', lintArgs)
+    core.debug(`Linting for directory ${migrationConfig.dir}`)    
+    const response = await util.exec(ATLAS_BINARY, lintArgs)
     return AtlasLintResponse.build(response, migrationConfig.relativeDir, skipErrorCodeList, lintCodePrefixes)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (ex: any) {
@@ -89,7 +92,7 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
     migrateApplyArgs.push('--url', migrationConfig.databaseUrl)
 
     core.debug(`Migrating for directory ${migrationConfig.dir}`)
-    const response = await util.exec('atlas', migrateApplyArgs)
+    const response = await util.exec(ATLAS_BINARY, migrateApplyArgs)
     return AtlasMigrationExecutionResponse.build(response)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (ex: any) {
@@ -143,7 +146,7 @@ async function drift(migrationConfig: MigrationConfig): Promise<DriftExecutionRe
     ]
 
     core.debug(`Drift detection for directory ${migrationConfig.dir}`)
-    const response = await util.exec('atlas', driftArgs)
+    const response = await util.exec(ATLAS_BINARY, driftArgs)
     return AtlasDriftResponse.build(response)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (ex: any) {

@@ -10,7 +10,10 @@
 1. Install [atlas](https://github.com/ariga/atlas)
 
     ```sh
-    curl -sSf https://atlasgo.sh | ATLAS_VERSION=v0.18.0 CI=true sh -s -- --community
+    ATLAS_VERSION=v0.18.0
+    curl -L -o "atlas" --fail "-#" "https://release.ariga.io/atlas/atlas-community-darwin-arm64-${ATLAS_VERSION}" && \
+      chmod +x atlas && \
+      mv atlas /opt/homebrew/bin/atlas
     ```
 
 ## Setup Env Vars
