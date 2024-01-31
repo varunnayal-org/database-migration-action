@@ -37,11 +37,6 @@ async function ensureSQLFilesInMigrationDir(sourceDir: string, destinationDir: s
   }
 }
 
-async function ensureAtlasConfigFile(sourceDir: string): Promise<void> {
-  const [atlasConfigFileName, atlasConfigFileContent] = atlas.getAtlasHCLFile()
-  await fs.writeFile(path.join(sourceDir, atlasConfigFileName), atlasConfigFileContent)
-}
-
 async function hydrateMigrationConfigWithDBAndDir(
   migrationConfig: MigrationConfig,
   dbConfig: DatabaseConfig,
@@ -53,7 +48,6 @@ async function hydrateMigrationConfigWithDBAndDir(
 
   const tempMigrationSQLDir = await util.createTempDir(path.join(TEMP_DIR_FOR_MIGRATION, dbConfig.directory))
   await ensureSQLFilesInMigrationDir(migrationConfig.originalDir, tempMigrationSQLDir)
-  await ensureAtlasConfigFile(tempMigrationSQLDir)
 
   migrationConfig.dir = tempMigrationSQLDir
   migrationConfig.databaseUrl = secrets[dbConfig.envName]

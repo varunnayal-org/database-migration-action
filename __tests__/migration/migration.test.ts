@@ -47,8 +47,7 @@ describe('buildMigrationConfigList', () => {
 
       expect(await fs.readdir(TEMP_DIR_FOR_MIGRATION)).toEqual([
         '00000000000001_create_test_table.sql',
-        '00000000000002_create_test2_table.sql',
-        'atlas.hcl'
+        '00000000000002_create_test2_table.sql'
       ])
     })
 
@@ -96,15 +95,13 @@ describe('buildMigrationConfigList', () => {
 
       expect(await fs.readdir(expectedMigrationConfigList[0].dir)).toEqual([
         '00000000000005_create_test5_table.sql',
-        '00000000000006_create_test6_table.sql',
-        'atlas.hcl'
+        '00000000000006_create_test6_table.sql'
       ])
 
       expect(await fs.readdir(expectedMigrationConfigList[1].dir)).toEqual([
         '00000000000007_create_test7_table.sql',
         '00000000000008_create_test8_table.sql',
-        '00000000000009_create_test9_table.sql',
-        'atlas.hcl'
+        '00000000000009_create_test9_table.sql'
       ])
     })
 

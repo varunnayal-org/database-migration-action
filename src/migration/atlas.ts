@@ -2,7 +2,6 @@ import * as core from '@actions/core'
 import * as util from '../util'
 import { AtlasLintResponse, AtlasMigrationExecutionResponse, AtlasDriftResponse } from './atlas-class'
 import { DriftExecutionResponse, MigrationConfig, MigrationExecutionResponse } from '../types'
-import { ATLAS_CONFIG_FILE_NAME, ATLAS_HCL } from '../constants'
 
 process.env.ATLAS_NO_UPDATE_NOTIFIER = '0'
 
@@ -13,18 +12,9 @@ function getDirArg(dirName: string): string {
   return `file://${dirName}`
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function getAtlasHCLFileArgs(dirName: string): string {
-  return `file://${dirName}/${ATLAS_CONFIG_FILE_NAME}`
-}
-
 async function hash(dir: string): Promise<void> {
   core.debug('Hashing migrations')
   await util.exec(ATLAS_BINARY, ['migrate', 'hash', '--dir', getDirArg(dir)])
-}
-
-function getAtlasHCLFile(): [string, string] {
-  return [ATLAS_CONFIG_FILE_NAME, ATLAS_HCL]
 }
 
 async function lint(
@@ -39,8 +29,6 @@ async function lint(
       'lint',
       '--dir',
       getDirArg(migrationConfig.dir),
-      // '-c',
-      // getAtlasHCLFileArgs(migrationConfig.dir),
       '--format',
       '"{{ json .Files }}"',
       '--latest',
@@ -48,7 +36,7 @@ async function lint(
       '--dev-url',
       migrationConfig.devUrl
     ]
-    core.debug(`Linting for directory ${migrationConfig.dir}`)    
+    core.debug(`Linting for directory ${migrationConfig.dir}`)
     const response = await util.exec(ATLAS_BINARY, lintArgs)
     return AtlasLintResponse.build(response, migrationConfig.relativeDir, skipErrorCodeList, lintCodePrefixes)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -155,4 +143,4 @@ async function drift(migrationConfig: MigrationConfig): Promise<DriftExecutionRe
   }
 }
 
-export { run, lint, drift, getAtlasHCLFile }
+export { run, lint, drift }

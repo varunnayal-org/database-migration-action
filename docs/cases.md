@@ -448,17 +448,7 @@ If we apply migration, second statement (`age`) will block as it needs to touch 
 Once killed, DBA/service owner can decide how they wish to proceed with the migration.
 
 - In case they still wish to proceed with it, they can plan the migration at low traffic time using `db migrate` comment.
-- If they'd need to apply it manually using tools like [pt-online-schema-change](https://docs.percona.com/percona-toolkit/pt-online-schema-change.html), then post applying migration they'd need to add/update `atlas_schema_revisions` with the revisions.
-
-  > Consider the file name is `{version}_{description}.sql` and has 2 statements
-  > So the query will be
-  >
-  > **TODO**: See if `atlas migrate set` can be used
-  >
-  > ```sql
-  > insert into atlas_schema_revisions
-  > ```
-  >
+- If they'd need to apply it manually using tools like [pt-online-schema-change](https://docs.percona.com/percona-toolkit/pt-online-schema-change.html), then post applying migration they'd need to add/update `atlas_schema_revisions` with the revisions via methods outlined in [manual migration](#manual-migration)
 
 ## Issues
 
