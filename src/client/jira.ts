@@ -41,6 +41,7 @@ class Client implements JiraClient {
   async #search(searchText: string): Promise<JiraIssue | null> {
     const jql = `project="${this.#project}" AND ${searchText}`
 
+    core.debug(`Search Jira: ${jql}`)
     const response = await executeWithRetry(async () => this.#api.searchJira(jql, { maxResults: 2 }), 'SearchIssue')
     if (response.issues.length === 0) {
       return null
@@ -54,9 +55,9 @@ class Client implements JiraClient {
     return await this.#search(`"${this.#fields.prLabel || this.#fields.pr}" = "${prLink}"`)
   }
 
-  async findSchemaDriftIssue(serviceName: string, doneStatus: string): Promise<JiraIssue | null> {
+  async findSchemaDriftIssue(repoLink: string, doneStatus: string): Promise<JiraIssue | null> {
     return await this.#search(
-      `"labels" = "${this.#schemaDriftTicketLabel}" AND "labels" = "${serviceName}" AND status != "${doneStatus}"`
+      `"labels" = "${this.#schemaDriftTicketLabel}" AND "${this.#fields.repoLabel}" = "${repoLink}" AND status != "${doneStatus}"`
     )
   }
 

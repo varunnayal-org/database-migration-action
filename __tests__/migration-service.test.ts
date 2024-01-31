@@ -172,7 +172,7 @@ describe('migration service', () => {
       allTeams: ['svc-team', 'svc-admin-team'],
       configFileName: 'db.migrations.json',
       dbSecretNameList: ['CALCULATOR_SVC_DB'],
-      devDBUrl: 'postgres://localhost:5432/calculator-svc',
+      devDBUrl: 'postgres://localhost:5432/calculator-svc?search_path=public',
       lintCodePrefixes: ['DS', 'BC', 'PG'],
       lintSkipErrorLabelPrefix: 'db-migration:lint:skip:',
       jira: {
@@ -188,6 +188,7 @@ describe('migration service', () => {
           pr: 'customfield_1',
           prLabel: 'GithHub PR Link',
           repo: 'customfield_2',
+          repoLabel: 'Code Repository Link',
           driApprovals: ['customfield_3']
         }
       }
@@ -440,7 +441,7 @@ describe('migration service', () => {
         // pr not approved by anyone
         ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ccc'])
         vaultClient.getSecrets = jest.fn().mockResolvedValue({
-          CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
+          CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc?search_path=public'
         })
         notifier.notify = jest.fn()
 
@@ -542,7 +543,7 @@ describe('migration service', () => {
         // pr not approved by approvalTeams
         ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ddd'])
         vaultClient.getSecrets = jest.fn().mockResolvedValue({
-          CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
+          CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc?search_path=public'
         })
         // JIRA ticket is approved
         jiraClient.findIssue = jest.fn().mockResolvedValue(getApprovedJiraIssue())
@@ -629,7 +630,7 @@ describe('migration service', () => {
         // pr not approved by approvalTeams
         ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ddd'])
         vaultClient.getSecrets = jest.fn().mockResolvedValue({
-          CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
+          CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc?search_path=public'
         })
         // JIRA ticket is approved
         jiraClient.findIssue = jest.fn().mockResolvedValue(getApprovedJiraIssue())
@@ -749,7 +750,7 @@ describe('migration service', () => {
       // pr not approved by approvalTeams
       ghClient.getPullRequestApprovedUserList = jest.fn().mockResolvedValue(['user-ddd'])
       vaultClient.getSecrets = jest.fn().mockResolvedValue({
-        CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc'
+        CALCULATOR_SVC_DB: 'postgres://some-host:1/calculator-svc?search_path=public'
       })
       // JIRA ticket is approved
       jiraClient.findIssue = jest.fn().mockResolvedValue(getApprovedJiraIssue())
@@ -982,7 +983,10 @@ describe('migration service', () => {
 
       expect(response).toEqual({ driftRunListResponse, jiraIssue, jiraComment: undefined })
       expect(jiraClient.findSchemaDriftIssue).toHaveBeenCalledTimes(1)
-      expect(jiraClient.findSchemaDriftIssue).toHaveBeenCalledWith(config.serviceName, config.jira?.doneValue)
+      expect(jiraClient.findSchemaDriftIssue).toHaveBeenCalledWith(
+        scheduleContext.payload.repository.html_url,
+        config.jira?.doneValue
+      )
       expect(notifier.drift).toHaveBeenCalledWith({
         driftRunListResponse,
         jiraIssue,

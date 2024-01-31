@@ -24,11 +24,12 @@ describe('JiraApi', () => {
         pr: 'customfield_1',
         prLabel: 'GithHub PR Link',
         repo: 'customfield_2',
+        repoLabel: 'Code Repository Link',
         driApprovals: ['customfield_3']
       },
       schemaDriftLabel: 'db-schema-drift',
       schemaDriftIssueType: 'Bug',
-      doneValue: 'DONE'
+      doneValue: 'Done'
     }
   }
 
@@ -202,11 +203,11 @@ describe('JiraApi', () => {
 
       mockSearchJira.mockResolvedValue(mockSearchResponse)
 
-      const result = await jira.findSchemaDriftIssue('my-svc', config.doneValue)
+      const result = await jira.findSchemaDriftIssue('https://example.com/org/repo', config.doneValue)
 
       expect(result).toEqual(mockSearchResponse.issues[0])
       expect(mockSearchJira).toHaveBeenCalledWith(
-        `project="${config.project}" AND "labels" = "${config.schemaDriftLabel}" AND "labels" = "my-svc" AND status != "${config.doneValue}"`,
+        `project="TEST" AND "labels" = "db-schema-drift" AND "Code Repository Link" = "https://example.com/org/repo" AND status != "Done"`,
         { maxResults: 2 }
       )
     })

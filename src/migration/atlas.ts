@@ -94,19 +94,6 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
 }
 
 /**
- * Removes the 'search_path' parameter from the database URL.
- * This is typically used to prepare the URL for drift detection, where the search path is not required.
- *
- * @param {string} dbURL - The original database URL.
- * @returns {string} - The modified database URL without the 'search_path' parameter.
- */
-function removeSearchPathFromURL(dbURL: string): string {
-  const urlObj = new URL(dbURL)
-  urlObj.searchParams.delete('search_path')
-  return urlObj.href
-}
-
-/**
  * Executes the drift detection command using Atlas CLI.
  * Drift detection is the process of identifying differences between the database schema in the
  * migration files and the actual schema in the database.
@@ -126,9 +113,9 @@ async function drift(migrationConfig: MigrationConfig): Promise<DriftExecutionRe
       '--from',
       getDirArg(migrationConfig.dir),
       '--to',
-      removeSearchPathFromURL(migrationConfig.databaseUrl),
+      migrationConfig.databaseUrl,
       '--dev-url',
-      removeSearchPathFromURL(migrationConfig.devUrl),
+      migrationConfig.devUrl,
       '--format',
       '"{{ sql . "  " }}"'
     ]

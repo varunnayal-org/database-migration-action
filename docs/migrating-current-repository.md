@@ -10,6 +10,7 @@
 1. Install [atlas](https://github.com/ariga/atlas)
 
     ```sh
+    # curl -sSf https://atlasgo.sh | ATLAS_VERSION=v0.18.0 CI=true sh -s -- --community
     ATLAS_VERSION=v0.18.0
     curl -L -o "atlas" --fail "-#" "https://release.ariga.io/atlas/atlas-community-darwin-arm64-${ATLAS_VERSION}" && \
       chmod +x atlas && \
@@ -30,7 +31,7 @@ MIGRATION_DIR=migrations
 REMOTE_DB="postgres://{user}:{secret}@{host}:{port}/{db-name}?search_path={schema-name}"
 
 # Not to be confused with development database
-DEV_DB="postgres://root:secret@localhost:5432/dev_db?sslmode=disable?search_path={schema-name}"
+DEV_DB="postgres://root:secret@localhost:5432/dev_db?sslmode=disable?search_path=public"
 
 SCHEMA=public
 ```

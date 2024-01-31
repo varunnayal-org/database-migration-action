@@ -20,6 +20,7 @@ export const LINT_CODE_DEFAULT_PREFIXES = ['DS', 'BC', 'PG']
 export const LINT_SKIP_ERROR_LABEL_PREFIX = 'db-migration:lint:skip:'
 
 export const TEMP_DIR_FOR_MIGRATION = 'tmp/__migrations__'
-export const TEMP_DIR_FOR_MIGRATION_CONFIG = 'tmp/config/__migrations__'
 export const ALLOWED_CHANGED_FILE_EXTENSION = ['.yml', '.yaml', '.sql', '.sum', '.hcl', '.xml', '.json']
+
 export const ATLAS_NO_DRIFT_STR = 'Schemas are synced, no changes to be made.'
+export const ATLAS_DRIFT_VERSION_TABLE = '-- Create "atlas_schema_revisions" table'

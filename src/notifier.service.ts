@@ -172,9 +172,13 @@ Unmatched Files:
 
     const jiraDescription = builder.drift(params.driftRunListResponse)
 
+    if (!this.#jiraClient) {
+      return Promise.resolve([undefined, undefined])
+    }
     // If we already have a JIRA ticket for drift with the same description.
     // depicts no action was taken by service team b/w multiple invocation of this action.
-    if (!this.#jiraClient || (jiraIssue !== null && jiraIssue.fields.description === jiraDescription)) {
+    if (jiraIssue !== null && jiraIssue.fields.description === jiraDescription) {
+      core.debug('Current JIRA ticket has same drift')
       return Promise.resolve([jiraIssue || undefined, undefined])
     }
 
@@ -187,7 +191,7 @@ Unmatched Files:
     } else {
       jiraIssuePromise = this.#jiraClient.createIssue({
         description: jiraDescription,
-        repoLink: params.repo?.html_url || '',
+        repoLink: params.repo.html_url,
         isSchemaDrift: true
       })
       jiraCommentPromise = Promise.resolve(undefined)

@@ -152,6 +152,7 @@ This setup is require only one time per organization that includes
     "pr" : "customfield_11111",     // Pull Request Link field
     "prLabel": "Label for pr field",// Label for "PR" field
     "repo" : "customfield_22222",   // Code Repo Link field
+    "repoLabel": "Label for repo"   // Label for repo field. Used for searching JIRA ticket for schema drifts.
     "driApprovals": [],             // fields to check for DRI approvals
   },
   "approvalStatus": "DONE",         // Default to DONE. Value to check in "fields.driApprovals" field list
@@ -218,7 +219,7 @@ This setup is require only one time per organization that includes
               jira_username: ${{ secrets.DB_MIGRATION_JIRA_USERNAME }}
               jira_password: ${{ secrets.DB_MIGRATION_JIRA_PASSWORD }}
               jira_config: ${{ vars.DB_MIGRATION_JIRA_CONFIG }}
-              dev_db_url: "postgres://postgres:postgres@postgres:5432/test?sslmode=disable"
+              dev_db_url: "postgres://postgres:postgres@postgres:5432/test?sslmode=disable&search_path=public"
     ```
 
 1. Add migration config file `db.migration.json`

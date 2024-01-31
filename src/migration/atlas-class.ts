@@ -1,4 +1,4 @@
-import { ATLAS_NO_DRIFT_STR } from '../../src/constants'
+import { ATLAS_DRIFT_VERSION_TABLE, ATLAS_NO_DRIFT_STR } from '../../src/constants'
 import {
   LintFileResult,
   LintDiagnosticError,
@@ -367,6 +367,7 @@ export class AtlasDriftResponse implements DriftExecutionResponse {
     const lines = responseCopy.split('\n')
 
     const statements: DriftStatement[] = []
+    let statementsSkipped = false
 
     let currentCommand = ''
     let comment = ''
@@ -385,10 +386,14 @@ export class AtlasDriftResponse implements DriftExecutionResponse {
             */
             return AtlasDriftResponse.fromError(response)
           }
-          statements.push({
-            comment,
-            command: currentCommand
-          })
+          if (comment !== ATLAS_DRIFT_VERSION_TABLE) {
+            statements.push({
+              comment,
+              command: currentCommand
+            })
+          } else {
+            statementsSkipped = true
+          }
           currentCommand = ''
           comment = ''
         }
@@ -396,7 +401,7 @@ export class AtlasDriftResponse implements DriftExecutionResponse {
     }
 
     // Capture response string that does not contain any ';'
-    if (statements.length === 0 && response) {
+    if (statements.length === 0 && statementsSkipped === false && response) {
       return AtlasDriftResponse.fromError(response)
     }
     return new AtlasDriftResponse(statements)

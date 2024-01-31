@@ -22,6 +22,12 @@ export type CustomFields = {
    * Add Repo Link to JIRA Issue.
    */
   repo: string
+
+  /**
+   * Repo Label used for searching ticket for schema drift
+   */
+  repoLabel: string
+
   /**
    * List of approvals required for PR to be merged.
    */
@@ -143,9 +149,10 @@ export interface JiraClient {
   /**
    * Finds a JIRA issue that has been created by schema drift
    *
-   * @param serviceName
+   * @param repoLink - Repository link
+   * @param doneStatus - Resolved status for JIRA ticket
    */
-  findSchemaDriftIssue(serviceName: string, doneStatus: string): Promise<JiraIssue | null>
+  findSchemaDriftIssue(repoLink: string, doneStatus: string): Promise<JiraIssue | null>
 
   /**
    * Creates a JIRA issue.

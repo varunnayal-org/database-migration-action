@@ -202,9 +202,9 @@ describe('atlas', () => {
         '--from',
         `file://${mgConfig.dir}`,
         '--to',
-        'postgres://root:secret@db.host:5432/appdb',
+        'postgres://root:secret@db.host:5432/appdb?search_path=public',
         '--dev-url',
-        'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled',
+        'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled&search_path=public',
         '--format',
         '"{{ sql . "  " }}"'
       ])

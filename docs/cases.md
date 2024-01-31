@@ -74,7 +74,7 @@ In case we have manually executed commands till `20240131184838_user.sql` versio
 
 ### Repository access not available
 
-- The schema file is in format `{revision}_{description}.sql`. Consider the file `20231207062947_add_phone.sql` for which we want to capture it in schema w/o running the migrations. DBA will run following query:
+- The schema file is in format `{revision}_{description}.sql`. Consider the file `20240131180053_config_id_index.sql` for which we want to capture it in schema w/o running the migrations. DBA will run following query:
   - `applied` and `total` set to 0.
   - `hash` should be the one calculated by `atlas`. But in this case it doesn't matter as `applied` and `total` are set to same value.
   - `type` is set to 4 that specifies RevisionTypeResolved in atlas.
@@ -82,7 +82,7 @@ In case we have manually executed commands till `20240131184838_user.sql` versio
   ```sql
   INSERT INTO
   atlas_schema_revisions(version, description,        type, applied, total, executed_at, execution_time, error,  error_stmt,hash, partial_hashes, operator_version)
-  VALUES                ('20231207062947', 'add_phone', 4,     0,      0,      now(),      0,               '','',             '','null', 'Atlas CLI v0.18.0');
+  VALUES                ('20240131180053', 'config_id_index', 4,     0,      0,      now(),      0,               '','',             '','null', 'Atlas CLI v0.18.0');
   ```
 
   Do this for all the migrations file that were executed manually.

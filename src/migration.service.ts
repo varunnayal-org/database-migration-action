@@ -483,15 +483,16 @@ export default class MigrationService {
 
     // No unexpected error and no drift, return early. No need to call JIRA
     if (!driftRunListResponse.errMsg && driftRunListResponse.hasSchemaDrifts === false) {
+      core.debug('No drifts present')
       return Promise.resolve({ driftRunListResponse })
     }
 
     const jiraIssue = await (this.#jiraClient?.findSchemaDriftIssue(
-      this.#config.serviceName,
+      payload.repository.html_url,
       this.#config.jira?.doneValue || ''
     ) ?? Promise.resolve(undefined))
 
-    const notifier = this.#factory.getNotifier(false, this.#config, this.#ghClient, null)
+    const notifier = this.#factory.getNotifier(false, this.#config, this.#ghClient, this.#jiraClient)
 
     const driftResponse = await notifier.drift({
       driftRunListResponse,

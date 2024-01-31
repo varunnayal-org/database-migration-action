@@ -571,6 +571,7 @@ describe('NotifierService', () => {
       svc = new NotifierService(false, {} as any, mockGithubClient, null)
       const response = await svc.buildDriftJiraComment(mockJiraBuilder, {
         repo,
+        jiraIssue: { key: 'KEY-1', id: '1', self: 'http://jira.com', fields: {} },
         driftRunListResponse: { drifts: [], hasSchemaDrifts: true }
       })
       expect(response).toEqual([undefined, undefined])

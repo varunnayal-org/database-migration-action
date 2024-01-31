@@ -97,6 +97,9 @@ const getJiraConfig = (jiraLabel: string): JIRAConfig | undefined => {
   if (!jiraConfig.fields.repo) {
     throw new Error('Jira config missing repo field')
   }
+  if (!jiraConfig.fields.repoLabel) {
+    throw new Error('Jira config missing repo label field')
+  }
 
   jiraConfig.issueType = jiraConfig.issueType || DEFAULT_JIRA_ISSUE_TYPE
   jiraConfig.label = jiraLabel

@@ -20,8 +20,6 @@ export function getRelativePathForDbDirectory(directory: string): string {
   return directory
 }
 
-export type CommentBuilderHandler = (boldText: string, msg?: string) => string
-
 async function cleanDir(dirName: string): Promise<void> {
   try {
     await fs.promises.rm(dirName, { recursive: true })
