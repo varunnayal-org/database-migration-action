@@ -188,7 +188,8 @@ This setup is require only one time per organization that includes
         runs-on: ubuntu-latest
         name: Schema Migration
         if: |
-          (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
+          (github.event_name == 'schedule') ||
+          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'db-migration') && !github.event.pull_request.draft) ||
           (github.event_name == 'pull_request_review' && github.event.review.state == 'approved') ||
           (github.event_name == 'issue_comment' && startsWith(github.event.comment.body, 'db migrate'))
         services:

@@ -152,3 +152,18 @@ Use [nektos/act](https://github.com/nektos/act) to run actions.
       --secret-file $ENV_FILE \
       -e /path/to/sample/pr-comment.json
     ```
+
+## Debugging
+
+If you get error `Error: Cannot find module '***/database-migration-action/dist/index.js'`, ensure
+
+- `database-migration-action` is not in `.gitignore`
+- Checkout action has been added as mentioned above
+
+  ```yaml
+  ...
+  steps:
+    - name: checkout repo
+      uses: actions/checkout@v3
+  ...
+  ```

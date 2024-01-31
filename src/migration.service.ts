@@ -441,7 +441,7 @@ export default class MigrationService {
       this.#config.baseBranch
     )
     if (errMsg) {
-      core.debug(errMsg)
+      core.error(errMsg)
       return
     }
 
