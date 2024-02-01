@@ -39,11 +39,11 @@
 
     # Create
     secretsmanager create-secret --name $SECRET_NAME --secret-string \
-    '{"DB_URL": "postgres://postgres://user:pass@host:port/dbname?search_path={schema-name}"}'
+    '{"DB_URL": "postgres://postgres://user:pass@host:port/dbname?search_path=schema-name"}'
 
     # Update
     secretsmanager put-secret-value --name $SECRET_NAME --secret-string \
-    '{"DB_URL": "postgres://postgres://user:pass@host:port/dbname?search_path={schema-name}"}'
+    '{"DB_URL": "postgres://postgres://user:pass@host:port/dbname?search_path=schema-name"}'
     ```
 
 ### Testing from workflow repository

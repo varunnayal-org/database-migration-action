@@ -5,6 +5,7 @@ import * as atlas from '../../src/migration/atlas'
 import { MigrationConfig } from '../../src/types'
 import { AtlasMigrationExecutionResponse, VersionExecution } from '../../src/migration/atlas-class'
 import { TEMP_DIR_FOR_MIGRATION } from '../../src/constants'
+import * as c from '../common'
 
 let utilExec: jest.SpyInstance
 
@@ -15,6 +16,7 @@ const getExpectedMigrationConfigList = (dir = '.', dbUrlKey = '', devUrl = ''): 
   databaseUrl: dbUrlKey === '' ? 'postgres://root:secret@db.host:5432/appdb?search_path=public' : dbUrlKey,
   baseline: '',
   dryRun: true,
+  revisionSchema: 'public',
   devUrl: devUrl === '' ? 'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled&search_path=public' : devUrl
 })
 function getBaseExecutionList(): VersionExecution[] {
@@ -48,9 +50,31 @@ describe('atlas', () => {
   })
 
   describe('run', () => {
+    const getExecParams = (mgConfig: MigrationConfig, execArgs: string[], rev = 'public'): string[] => {
+      return [
+        'migrate',
+        'apply',
+        '--dir',
+        `file://${mgConfig.dir}`,
+        '--format',
+        '"{{ json .Applied }}"',
+        '--exec-order',
+        'linear',
+        '--tx-mode',
+        'file',
+        '--lock-timeout',
+        '10s',
+        '--revisions-schema',
+        rev,
+        ...execArgs,
+        '--url',
+        mgConfig.databaseUrl
+      ]
+    }
     it('should return response', async () => {
       const baseline = '00000000000000_baseline.sql'
       const migrationConfig = getExpectedMigrationConfigList()
+      migrationConfig.revisionSchema = 'mySchema'
       migrationConfig.baseline = baseline
       const utilExecFn = utilExec.mockImplementationOnce(() => JSON.stringify(getBaseExecutionList()))
 
@@ -63,25 +87,11 @@ describe('atlas', () => {
         '--dir',
         `file://${migrationConfig.dir}`
       ])
-      expect(utilExecFn).toHaveBeenNthCalledWith(2, 'atlas', [
-        'migrate',
-        'apply',
-        '--dir',
-        `file://${migrationConfig.dir}`,
-        '--format',
-        '"{{ json .Applied }}"',
-        '--exec-order',
-        'linear',
-        '--tx-mode',
-        'file',
-        '--lock-timeout',
-        '10s',
-        '--dry-run',
-        '--baseline',
-        baseline,
-        '--url',
-        `${migrationConfig.databaseUrl}`
-      ])
+      expect(utilExecFn).toHaveBeenNthCalledWith(
+        2,
+        'atlas',
+        getExecParams(migrationConfig, ['--dry-run', '--baseline', baseline], 'mySchema')
+      )
     })
 
     it('should return response for execution dryRun=false', async () => {
@@ -98,22 +108,7 @@ describe('atlas', () => {
         '--dir',
         `file://${migrationConfig.dir}`
       ])
-      expect(utilExecFn).toHaveBeenNthCalledWith(2, 'atlas', [
-        'migrate',
-        'apply',
-        '--dir',
-        `file://${migrationConfig.dir}`,
-        '--format',
-        '"{{ json .Applied }}"',
-        '--exec-order',
-        'linear',
-        '--tx-mode',
-        'file',
-        '--lock-timeout',
-        '10s',
-        '--url',
-        `${migrationConfig.databaseUrl}`
-      ])
+      expect(utilExecFn).toHaveBeenNthCalledWith(2, 'atlas', getExecParams(migrationConfig, []))
     })
 
     it('should return response when errored out with json list', async () => {
@@ -141,23 +136,7 @@ describe('atlas', () => {
         `file://${migrationConfig.dir}`
       ])
 
-      expect(utilExecFn).toHaveBeenNthCalledWith(2, 'atlas', [
-        'migrate',
-        'apply',
-        '--dir',
-        `file://${migrationConfig.dir}`,
-        '--format',
-        '"{{ json .Applied }}"',
-        '--exec-order',
-        'linear',
-        '--tx-mode',
-        'file',
-        '--lock-timeout',
-        '10s',
-        '--dry-run',
-        '--url',
-        `${migrationConfig.databaseUrl}`
-      ])
+      expect(utilExecFn).toHaveBeenNthCalledWith(2, 'atlas', getExecParams(migrationConfig, ['--dry-run']))
     })
 
     it('should throw on unexpected response', async () => {
@@ -188,6 +167,74 @@ describe('atlas', () => {
     })
   })
 
+  describe('lint', () => {
+    let migrationConfig: MigrationConfig
+    beforeEach(() => {
+      migrationConfig = getExpectedMigrationConfigList()
+      migrationConfig.baseline = '00000000000000_baseline.sql'
+    })
+
+    it('should run lint', async () => {
+      const utilExecFn = utilExec.mockResolvedValue(c.artifacts.no_lint_error.lintResponseOutput.mg1)
+      const response = await atlas.lint(migrationConfig, ['PG101'], ['DS101', 'PG101', 'DS103'])
+
+      expect(response).toEqual({
+        fileLintResults: [],
+        migrationDir: 'tmp/__migrations__',
+        allSkipped: true,
+        firstError: undefined
+      })
+      expect(utilExecFn).toHaveBeenCalledTimes(2)
+      expect(utilExecFn).toHaveBeenNthCalledWith(2, 'atlas', [
+        'migrate',
+        'lint',
+        '--dir',
+        `file://${migrationConfig.dir}`,
+        '--format',
+        '"{{ json .Files }}"',
+        '--latest',
+        `${migrationConfig.lintLatestFiles || 10000}`,
+        '--dev-url',
+        migrationConfig.devUrl
+      ])
+    })
+
+    it('should capture lint error', async () => {
+      const utilExecFn = utilExec.mockRejectedValue(
+        new Error(c.artifacts.sql_file_error_lint_skipped.lintResponseOutput.mg1)
+      )
+
+      const response = await atlas.lint(migrationConfig, ['PG101'], ['DS101', 'PG101', 'DS103'])
+
+      expect(response).toEqual({
+        fileLintResults: [
+          {
+            filename: '20231222064941_step3.sql',
+            diagnostics: [{ error: 'executing statement: pq: column "email" does not exist' }]
+          }
+        ],
+        migrationDir: 'tmp/__migrations__',
+        allSkipped: false,
+        firstError: 'executing statement: pq: column "email" does not exist'
+      })
+      expect(utilExecFn).toHaveBeenCalledTimes(1)
+      expect(utilExecFn).toHaveBeenCalledWith('atlas', ['migrate', 'hash', '--dir', `file://${migrationConfig.dir}`])
+    })
+
+    it('should capture unwanted error', async () => {
+      utilExec.mockRejectedValue(new Error('Unable to connect to database'))
+
+      const response = await atlas.lint(migrationConfig, ['PG101'], ['DS101', 'PG101', 'DS103'])
+
+      expect(response).toEqual({
+        fileLintResults: [],
+        migrationDir: 'tmp/__migrations__',
+        allSkipped: false,
+        firstError: 'Unable to connect to database'
+      })
+    })
+  })
+
   describe('drift', () => {
     let migrationConfig: MigrationConfig
     beforeEach(() => {
@@ -199,14 +246,16 @@ describe('atlas', () => {
       expect(utilExecFn).toHaveBeenCalledWith('atlas', [
         'schema',
         'diff',
-        '--from',
-        `file://${mgConfig.dir}`,
-        '--to',
-        'postgres://root:secret@db.host:5432/appdb?search_path=public',
         '--dev-url',
         'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled&search_path=public',
         '--format',
-        '"{{ sql . "  " }}"'
+        '"{{ sql . "  " }}"',
+        '--exclude',
+        'atlas_schema_revisions',
+        '--from',
+        `file://${mgConfig.dir}`,
+        '--to',
+        'postgres://root:secret@db.host:5432/appdb?search_path=public'
       ])
     }
 

@@ -84,7 +84,8 @@ async function buildMigrationConfigList(
       dir: '', // filled later on when hydrating
       dryRun: true,
       baseline: dbConfig.baseline,
-      devUrl
+      devUrl,
+      revisionSchema: dbConfig.revisionSchema
     }
     return migrationConfig
   })

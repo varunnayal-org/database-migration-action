@@ -69,6 +69,7 @@ export function getMigrationConfigList(
       databaseUrl: databaseUrl === '' ? 'postgres://root:secret@db.host:5432/appdb?search_path=public' : databaseUrl,
       baseline: undefined,
       dryRun: true,
+      revisionSchema: 'public',
       devUrl:
         devUrl === '' ? 'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled&search_path=public' : devUrl
     }

@@ -101,8 +101,21 @@ export interface Config {
 
 export interface DatabaseConfig {
   directory: string
-  baseline?: string
+
+  /**
+   * Key under which db connection string resides
+   */
   envName: string
+
+  /**
+   * Baseline version. Passed as "--baseline" flag in "atlas migrate apply" command
+   */
+  baseline?: string
+
+  /**
+   * Schema where revision table resides. Defaults to "public"
+   */
+  revisionSchema: string
 }
 
 /**
@@ -228,6 +241,11 @@ export interface MigrationConfig {
    * An optional number of latest files to lint.
    */
   lintLatestFiles?: number
+
+  /**
+   * Schema where revision table resides. Defaults to "public"
+   */
+  revisionSchema: string
 }
 
 /**

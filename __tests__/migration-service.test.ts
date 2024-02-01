@@ -163,7 +163,8 @@ describe('migration service', () => {
       databases: [
         {
           directory: '.',
-          envName: 'CALCULATOR_SVC_DB'
+          envName: 'CALCULATOR_SVC_DB',
+          revisionSchema: 'public'
         }
       ],
 

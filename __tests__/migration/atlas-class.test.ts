@@ -194,6 +194,14 @@ describe('AtlasLintResponse', () => {
                 errorCodeGroup: 'destructive changes detected',
                 pos: 344,
                 canSkip: false
+              },
+              {
+                message:
+                  'Adding a non-nullable "character varying(50)" column "email" will fail in case table "users" is not empty',
+                errorCode: 'MF103',
+                errorCodeGroup: 'data dependent changes detected',
+                pos: 286,
+                canSkip: true
               }
             ]
           },
@@ -244,6 +252,14 @@ describe('AtlasLintResponse', () => {
                 errorCodeGroup: 'destructive changes detected',
                 pos: 344,
                 canSkip: true
+              },
+              {
+                message:
+                  'Adding a non-nullable "character varying(50)" column "email" will fail in case table "users" is not empty',
+                errorCode: 'MF103',
+                errorCodeGroup: 'data dependent changes detected',
+                pos: 286,
+                canSkip: true
               }
             ]
           },
@@ -293,6 +309,14 @@ describe('AtlasLintResponse', () => {
                 errorCode: 'DS103',
                 errorCodeGroup: 'destructive changes detected',
                 pos: 344,
+                canSkip: true
+              },
+              {
+                message:
+                  'Adding a non-nullable "character varying(50)" column "email" will fail in case table "users" is not empty',
+                errorCode: 'MF103',
+                errorCodeGroup: 'data dependent changes detected',
+                pos: 286,
                 canSkip: true
               }
             ]

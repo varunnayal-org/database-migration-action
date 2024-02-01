@@ -281,14 +281,15 @@ export class AtlasLintResponse implements LintExecutionResponse {
 
         for (const reportJson of reports) {
           for (const diagnosticJson of reportJson.Diagnostics || []) {
+            let canSkipError = false
             // if the error code is not allowed, then continue
             if (!lintCodePrefixes.some(prefix => diagnosticJson.Code.startsWith(prefix))) {
-              continue
+              canSkipError = true
             }
             if (!firstError) {
               firstError = diagnosticJson.Text
             }
-            const canSkipError = skipErrorCodeList.includes(diagnosticJson.Code)
+            canSkipError = canSkipError || skipErrorCodeList.includes(diagnosticJson.Code)
             allSkipped = allSkipped && canSkipError
             diagnostics.push(
               new AtlasFileDiagnostic(
@@ -386,6 +387,7 @@ export class AtlasDriftResponse implements DriftExecutionResponse {
             */
             return AtlasDriftResponse.fromError(response)
           }
+          // This should not come as we are using "--exclude" parameter in "atlas schema diff"
           if (comment !== ATLAS_DRIFT_VERSION_TABLE) {
             statements.push({
               comment,

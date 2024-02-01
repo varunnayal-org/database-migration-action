@@ -67,7 +67,9 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
       '--tx-mode',
       'file',
       '--lock-timeout',
-      '10s'
+      '10s',
+      '--revisions-schema',
+      migrationConfig.revisionSchema
     ]
 
     if (migrationConfig.dryRun) {
@@ -110,14 +112,16 @@ async function drift(migrationConfig: MigrationConfig): Promise<DriftExecutionRe
     const driftArgs = [
       'schema',
       'diff',
-      '--from',
-      getDirArg(migrationConfig.dir),
-      '--to',
-      migrationConfig.databaseUrl,
       '--dev-url',
       migrationConfig.devUrl,
       '--format',
-      '"{{ sql . "  " }}"'
+      '"{{ sql . "  " }}"',
+      '--exclude',
+      'atlas_schema_revisions',
+      '--from',
+      getDirArg(migrationConfig.dir),
+      '--to',
+      migrationConfig.databaseUrl
     ]
 
     core.debug(`Drift detection for directory ${migrationConfig.dir}`)

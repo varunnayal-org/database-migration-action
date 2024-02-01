@@ -13,7 +13,8 @@ let atlasRun: jest.SpyInstance
 
 const getDB = (directory = '.', envName = 'test'): DatabaseConfig => ({
   directory,
-  envName
+  envName,
+  revisionSchema: 'public'
 })
 
 const getVaultKeyStore = (...names: string[]): SecretMap =>

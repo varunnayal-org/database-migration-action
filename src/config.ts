@@ -12,6 +12,7 @@ import {
   DEFAULT_MIGRATION_BASE_DIR,
   DEFAULT_MIGRATION_CHILD_DIR,
   DEFAULT_PR_LABEL,
+  DEFAULT_REVISION_SCHEMA,
   LINT_CODE_DEFAULT_PREFIXES,
   LINT_SKIP_ERROR_LABEL_PREFIX
 } from './constants'
@@ -30,6 +31,9 @@ function prepareRuntimeConfig(config: Config, configFileName: string): void {
     }
     if (acc.includes(dbConfig.envName)) {
       throw new Error(`Config databases.${idx}.envName is duplicate`)
+    }
+    if (!dbConfig.revisionSchema) {
+      dbConfig.revisionSchema = DEFAULT_REVISION_SCHEMA
     }
     acc.push(dbConfig.envName)
 
