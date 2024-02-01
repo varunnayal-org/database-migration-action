@@ -13,7 +13,9 @@ inputs:
   jira_password:
     description: JIRA password
   jira_config:
-    description: 'JIRA config token having following keys host, project, issueType("Story"), fields.pr, fields.prLabel, fields?.repo, fields.driApprovals, approvalStatus("DONE"), doneValue("Done")'
+    description:
+      'JIRA config token having following keys host, project, issueType("Story"), fields.pr, fields.prLabel,
+      fields?.repo, fields.driApprovals, approvalStatus("DONE"), doneValue("Done")'
     required: true
   aws_secret_store:
     description: AWS Secret ID where database connection strings are stored
@@ -56,8 +58,11 @@ runs:
           github.event_name == 'pull_request' &&
           !github.event.pull_request.draft && '1' || '0'
         }}
+        schedule=${{
+          github.event_name == 'schedule' && '1' || '0'
+        }}
 
-        if [[ $pr_comment == '1' || $pr_review == '1' || $pr == '1' ]]; then
+        if [[ $schedule == '1' || $pr_comment == '1' || $pr_review == '1' || $pr == '1' ]]; then
           can_execute='1'
         else
           can_execute='0'
@@ -68,6 +73,7 @@ runs:
         echo "pr_comment=$pr_comment" >> $GITHUB_OUTPUT
         echo "pr_review=$pr_review" >> $GITHUB_OUTPUT
         echo "pr=$pr" >> $GITHUB_OUTPUT
+        echo "schedule=$schedule" >> $GITHUB_OUTPUT
         echo "can_execute=$can_execute" >> $GITHUB_OUTPUT
 
     - name: Fetch PR details for PR Comment

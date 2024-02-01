@@ -1,27 +1,20 @@
 import * as core from '@actions/core'
 import * as util from '../util'
-import { AtlasLintResponse, AtlasMigrationExecutionResponse } from './atlas-class'
-import { MigrationConfig, MigrationExecutionResponse } from '../types'
-import { ATLAS_CONFIG_FILE_NAME, ATLAS_HCL } from '../constants'
+import { AtlasLintResponse, AtlasMigrationExecutionResponse, AtlasDriftResponse } from './atlas-class'
+import { DriftExecutionResponse, MigrationConfig, MigrationExecutionResponse } from '../types'
 
 process.env.ATLAS_NO_UPDATE_NOTIFIER = '0'
+
+const ATLAS_BINARY = 'atlas'
+// const ATLAS_BINARY = './database-migration-action/atlas'
 
 function getDirArg(dirName: string): string {
   return `file://${dirName}`
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function getAtlasHCLFileArgs(dirName: string): string {
-  return `file://${dirName}/${ATLAS_CONFIG_FILE_NAME}`
-}
-
 async function hash(dir: string): Promise<void> {
   core.debug('Hashing migrations')
-  await util.exec('atlas', ['migrate', 'hash', '--dir', getDirArg(dir)])
-}
-
-function getAtlasHCLFile(): [string, string] {
-  return [ATLAS_CONFIG_FILE_NAME, ATLAS_HCL]
+  await util.exec(ATLAS_BINARY, ['migrate', 'hash', '--dir', getDirArg(dir)])
 }
 
 async function lint(
@@ -36,8 +29,6 @@ async function lint(
       'lint',
       '--dir',
       getDirArg(migrationConfig.dir),
-      // '-c',
-      // getAtlasHCLFileArgs(migrationConfig.dir),
       '--format',
       '"{{ json .Files }}"',
       '--latest',
@@ -46,7 +37,7 @@ async function lint(
       migrationConfig.devUrl
     ]
     core.debug(`Linting for directory ${migrationConfig.dir}`)
-    const response = await util.exec('atlas', lintArgs)
+    const response = await util.exec(ATLAS_BINARY, lintArgs)
     return AtlasLintResponse.build(response, migrationConfig.relativeDir, skipErrorCodeList, lintCodePrefixes)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (ex: any) {
@@ -76,7 +67,9 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
       '--tx-mode',
       'file',
       '--lock-timeout',
-      '10s'
+      '10s',
+      '--revisions-schema',
+      migrationConfig.revisionSchema
     ]
 
     if (migrationConfig.dryRun) {
@@ -89,7 +82,7 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
     migrateApplyArgs.push('--url', migrationConfig.databaseUrl)
 
     core.debug(`Migrating for directory ${migrationConfig.dir}`)
-    const response = await util.exec('atlas', migrateApplyArgs)
+    const response = await util.exec(ATLAS_BINARY, migrateApplyArgs)
     return AtlasMigrationExecutionResponse.build(response)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (ex: any) {
@@ -102,4 +95,43 @@ async function run(migrationConfig: MigrationConfig): Promise<MigrationExecution
   }
 }
 
-export { run, lint, getAtlasHCLFile }
+/**
+ * Executes the drift detection command using Atlas CLI.
+ * Drift detection is the process of identifying differences between the database schema in the
+ * migration files and the actual schema in the database.
+ *
+ * TODO:
+ * - Check if `atlas schema diff` has a command to get diffs in `JSON format`. Till v0.18.0, it does not has any.
+ *  - Check [SchemaDiffFuncs](https://github.com/ariga/atlas/blob/master/cmd/atlas/internal/cmdlog/cmdlog.go#L874-L876) variable
+ *
+ * @param {MigrationConfig} migrationConfig - The configuration for the migration.
+ * @returns {Promise<DriftExecutionResponse>} - The response from the drift detection execution
+ */
+async function drift(migrationConfig: MigrationConfig): Promise<DriftExecutionResponse> {
+  try {
+    const driftArgs = [
+      'schema',
+      'diff',
+      '--dev-url',
+      migrationConfig.devUrl,
+      '--format',
+      '"{{ sql . "  " }}"',
+      '--exclude',
+      'atlas_schema_revisions',
+      '--from',
+      getDirArg(migrationConfig.dir),
+      '--to',
+      migrationConfig.databaseUrl
+    ]
+
+    core.debug(`Drift detection for directory ${migrationConfig.dir}`)
+    const response = await util.exec(ATLAS_BINARY, driftArgs)
+    return AtlasDriftResponse.build(response)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (ex: any) {
+    core.error(`ErrorDrift[tmp_dir=${migrationConfig.dir}]: ${ex} ${ex.stack}`)
+    return AtlasDriftResponse.fromError(ex.message)
+  }
+}
+
+export { run, lint, drift }

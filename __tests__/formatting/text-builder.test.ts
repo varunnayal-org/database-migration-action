@@ -1,24 +1,10 @@
 import { Platform } from '../../src/formatting/formatters'
 import { TextBuilder } from '../../src/formatting/text-builder'
-import { MigrationLintResponse, MigrationRunListResponse } from '../../src/types'
+import { DriftRunListResponse, MigrationLintResponse, MigrationRunListResponse } from '../../src/types'
 import * as util from '../../src/util'
 import * as c from '../common'
-import { AtlasLintResponse, AtlasMigrationExecutionResponse } from '../../src/migration/atlas-class'
+import { AtlasDriftResponse, AtlasLintResponse, AtlasMigrationExecutionResponse } from '../../src/migration/atlas-class'
 import { LINT_CODE_DEFAULT_PREFIXES } from '../../src/constants'
-
-type BuildTextParams = {
-  name: string
-  args: MigrationRunListResponse
-  github: string
-  jira: string
-}
-
-type LintTextParams = {
-  name: string
-  args: MigrationLintResponse
-  github: string
-  jira: string
-}
 
 describe('TexBuilder', () => {
   const getTextBuilder = (dryRun = false, dbDirList = ['migrations']): TextBuilder =>
@@ -51,6 +37,13 @@ describe('TexBuilder', () => {
   const platforms: Platform[] = ['github', 'jira']
 
   describe('build()', () => {
+    type BuildTextParams = {
+      name: string
+      args: MigrationRunListResponse
+      github: string
+      jira: string
+    }
+
     const testCases: BuildTextParams[] = [
       {
         name: 'should print migration execution on successful',
@@ -139,6 +132,13 @@ describe('TexBuilder', () => {
   })
 
   describe('getLintMessage', () => {
+    type LintTextParams = {
+      name: string
+      args: MigrationLintResponse
+      github: string
+      jira: string
+    }
+
     const lintTestCases: LintTextParams[] = [
       {
         name: 'file error',
@@ -173,8 +173,8 @@ describe('TexBuilder', () => {
           canSkipAllErrors: false
         },
         github:
-          '**Lint Errors**\n*Directory*: `mg1`\n| Skipped | File | Error | Error Code | Position |\n| --- | --- | --- | --- | --- |\n|❌|20231222064929_step2.sql|Dropping non-virtual column "old_email"|[DS103](https://atlasgo.io/lint/analyzers#DS103)|344|\n|❌|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103](https://atlasgo.io/lint/analyzers#PG103)|0|\n|❌|20231222064941_step3.sql|Creating index "idx_users_age" non-concurrently causes write locks on the "users" table|[PG101](https://atlasgo.io/lint/analyzers#PG101)|60|\n',
-        jira: '*Lint Errors*\n_Directory_: {{mg1}}\n||Skipped||File||Error||Error Code||Position||\n|(x)|20231222064929_step2.sql|Dropping non-virtual column "old_email"|[DS103|https://atlasgo.io/lint/analyzers#DS103]|344|\n|(x)|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103|https://atlasgo.io/lint/analyzers#PG103]|0|\n|(x)|20231222064941_step3.sql|Creating index "idx_users_age" non-concurrently causes write locks on the "users" table|[PG101|https://atlasgo.io/lint/analyzers#PG101]|60|\n'
+          '**Lint Errors**\n*Directory*: `mg1`\n| Skipped | File | Error | Error Code | Position |\n| --- | --- | --- | --- | --- |\n|❌|20231222064929_step2.sql|Dropping non-virtual column "old_email"|[DS103](https://atlasgo.io/lint/analyzers#DS103)|344|\n|✅|20231222064929_step2.sql|Adding a non-nullable "character varying(50)" column "email" will fail in case table "users" is not empty|[MF103](https://atlasgo.io/lint/analyzers#MF103)|286|\n|❌|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103](https://atlasgo.io/lint/analyzers#PG103)|0|\n|❌|20231222064941_step3.sql|Creating index "idx_users_age" non-concurrently causes write locks on the "users" table|[PG101](https://atlasgo.io/lint/analyzers#PG101)|60|\n',
+        jira: '*Lint Errors*\n_Directory_: {{mg1}}\n||Skipped||File||Error||Error Code||Position||\n|(x)|20231222064929_step2.sql|Dropping non-virtual column "old_email"|[DS103|https://atlasgo.io/lint/analyzers#DS103]|344|\n|(/)|20231222064929_step2.sql|Adding a non-nullable "character varying(50)" column "email" will fail in case table "users" is not empty|[MF103|https://atlasgo.io/lint/analyzers#MF103]|286|\n|(x)|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103|https://atlasgo.io/lint/analyzers#PG103]|0|\n|(x)|20231222064941_step3.sql|Creating index "idx_users_age" non-concurrently causes write locks on the "users" table|[PG101|https://atlasgo.io/lint/analyzers#PG101]|60|\n'
       },
       {
         name: 'error in one file',
@@ -234,15 +234,10 @@ describe('TexBuilder', () => {
           canSkipAllErrors: false
         },
         github:
-          '**Lint Errors**\n*Directory*: `mg1`\n| Skipped | File | Error | Error Code | Position |\n| --- | --- | --- | --- | --- |\n|❌|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103](https://atlasgo.io/lint/analyzers#PG103)|0|\n|❌|20231222064941_step3.sql|Creating index "idx_users_email" non-concurrently causes write locks on the "users" table|[PG101](https://atlasgo.io/lint/analyzers#PG101)|0|\n\n*Directory*: `mg3`\n| Skipped | File | Error | Error Code | Position |\n| --- | --- | --- | --- | --- |\n|❌|20231222064941_step3.sql|executing statement: pq: column "email" does not exist|-|-|\n\n*Directory*: `mg4`\n| Skipped | File | Error | Error Code | Position |\n| --- | --- | --- | --- | --- |\n|❌|20231222064929_step2.sql|Dropping non-virtual column "old_email"|[DS103](https://atlasgo.io/lint/analyzers#DS103)|344|\n|✅|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103](https://atlasgo.io/lint/analyzers#PG103)|0|\n|❌|20231222064941_step3.sql|Creating index "idx_users_age" non-concurrently causes write locks on the "users" table|[PG101](https://atlasgo.io/lint/analyzers#PG101)|60|\n\n*Directory*: `mg5`\n| Skipped | File | Error | Error Code | Position |\n| --- | --- | --- | --- | --- |\n|✅|20231222064929_step2.sql|Dropping non-virtual column "old_email"|[DS103](https://atlasgo.io/lint/analyzers#DS103)|344|\n|✅|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103](https://atlasgo.io/lint/analyzers#PG103)|0|\n|✅|20231222064941_step3.sql|Creating index "idx_users_age" non-concurrently causes write locks on the "users" table|[PG101](https://atlasgo.io/lint/analyzers#PG101)|60|\n',
-        jira: '*Lint Errors*\n_Directory_: {{mg1}}\n||Skipped||File||Error||Error Code||Position||\n|(x)|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103|https://atlasgo.io/lint/analyzers#PG103]|0|\n|(x)|20231222064941_step3.sql|Creating index "idx_users_email" non-concurrently causes write locks on the "users" table|[PG101|https://atlasgo.io/lint/analyzers#PG101]|0|\n\n_Directory_: {{mg3}}\n||Skipped||File||Error||Error Code||Position||\n|(x)|20231222064941_step3.sql|executing statement: pq: column "email" does not exist|-|-|\n\n_Directory_: {{mg4}}\n||Skipped||File||Error||Error Code||Position||\n|(x)|20231222064929_step2.sql|Dropping non-virtual column "old_email"|[DS103|https://atlasgo.io/lint/analyzers#DS103]|344|\n|(/)|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103|https://atlasgo.io/lint/analyzers#PG103]|0|\n|(x)|20231222064941_step3.sql|Creating index "idx_users_age" non-concurrently causes write locks on the "users" table|[PG101|https://atlasgo.io/lint/analyzers#PG101]|60|\n\n_Directory_: {{mg5}}\n||Skipped||File||Error||Error Code||Position||\n|(/)|20231222064929_step2.sql|Dropping non-virtual column "old_email"|[DS103|https://atlasgo.io/lint/analyzers#DS103]|344|\n|(/)|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103|https://atlasgo.io/lint/analyzers#PG103]|0|\n|(/)|20231222064941_step3.sql|Creating index "idx_users_age" non-concurrently causes write locks on the "users" table|[PG101|https://atlasgo.io/lint/analyzers#PG101]|60|\n'
+          '**Lint Errors**\n*Directory*: `mg1`\n| Skipped | File | Error | Error Code | Position |\n| --- | --- | --- | --- | --- |\n|❌|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103](https://atlasgo.io/lint/analyzers#PG103)|0|\n|❌|20231222064941_step3.sql|Creating index "idx_users_email" non-concurrently causes write locks on the "users" table|[PG101](https://atlasgo.io/lint/analyzers#PG101)|0|\n\n*Directory*: `mg3`\n| Skipped | File | Error | Error Code | Position |\n| --- | --- | --- | --- | --- |\n|❌|20231222064941_step3.sql|executing statement: pq: column "email" does not exist|-|-|\n\n*Directory*: `mg4`\n| Skipped | File | Error | Error Code | Position |\n| --- | --- | --- | --- | --- |\n|❌|20231222064929_step2.sql|Dropping non-virtual column "old_email"|[DS103](https://atlasgo.io/lint/analyzers#DS103)|344|\n|✅|20231222064929_step2.sql|Adding a non-nullable "character varying(50)" column "email" will fail in case table "users" is not empty|[MF103](https://atlasgo.io/lint/analyzers#MF103)|286|\n|✅|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103](https://atlasgo.io/lint/analyzers#PG103)|0|\n|❌|20231222064941_step3.sql|Creating index "idx_users_age" non-concurrently causes write locks on the "users" table|[PG101](https://atlasgo.io/lint/analyzers#PG101)|60|\n\n*Directory*: `mg5`\n| Skipped | File | Error | Error Code | Position |\n| --- | --- | --- | --- | --- |\n|✅|20231222064929_step2.sql|Dropping non-virtual column "old_email"|[DS103](https://atlasgo.io/lint/analyzers#DS103)|344|\n|✅|20231222064929_step2.sql|Adding a non-nullable "character varying(50)" column "email" will fail in case table "users" is not empty|[MF103](https://atlasgo.io/lint/analyzers#MF103)|286|\n|✅|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103](https://atlasgo.io/lint/analyzers#PG103)|0|\n|✅|20231222064941_step3.sql|Creating index "idx_users_age" non-concurrently causes write locks on the "users" table|[PG101](https://atlasgo.io/lint/analyzers#PG101)|60|\n',
+        jira: '*Lint Errors*\n_Directory_: {{mg1}}\n||Skipped||File||Error||Error Code||Position||\n|(x)|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103|https://atlasgo.io/lint/analyzers#PG103]|0|\n|(x)|20231222064941_step3.sql|Creating index "idx_users_email" non-concurrently causes write locks on the "users" table|[PG101|https://atlasgo.io/lint/analyzers#PG101]|0|\n\n_Directory_: {{mg3}}\n||Skipped||File||Error||Error Code||Position||\n|(x)|20231222064941_step3.sql|executing statement: pq: column "email" does not exist|-|-|\n\n_Directory_: {{mg4}}\n||Skipped||File||Error||Error Code||Position||\n|(x)|20231222064929_step2.sql|Dropping non-virtual column "old_email"|[DS103|https://atlasgo.io/lint/analyzers#DS103]|344|\n|(/)|20231222064929_step2.sql|Adding a non-nullable "character varying(50)" column "email" will fail in case table "users" is not empty|[MF103|https://atlasgo.io/lint/analyzers#MF103]|286|\n|(/)|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103|https://atlasgo.io/lint/analyzers#PG103]|0|\n|(x)|20231222064941_step3.sql|Creating index "idx_users_age" non-concurrently causes write locks on the "users" table|[PG101|https://atlasgo.io/lint/analyzers#PG101]|60|\n\n_Directory_: {{mg5}}\n||Skipped||File||Error||Error Code||Position||\n|(/)|20231222064929_step2.sql|Dropping non-virtual column "old_email"|[DS103|https://atlasgo.io/lint/analyzers#DS103]|344|\n|(/)|20231222064929_step2.sql|Adding a non-nullable "character varying(50)" column "email" will fail in case table "users" is not empty|[MF103|https://atlasgo.io/lint/analyzers#MF103]|286|\n|(/)|20231222064941_step3.sql|Indexes cannot be created or deleted concurrently within a transaction. Add the `atlas:txmode none` directive to the header to prevent this file from running in a transaction|[PG103|https://atlasgo.io/lint/analyzers#PG103]|0|\n|(/)|20231222064941_step3.sql|Creating index "idx_users_age" non-concurrently causes write locks on the "users" table|[PG101|https://atlasgo.io/lint/analyzers#PG101]|60|\n'
       }
     ]
-    let t: TextBuilder
-    beforeEach(() => {
-      t = getTextBuilder()
-      t.dryRun = true
-    })
 
     for (const platform of platforms) {
       describe(`${platform}`, () => {
@@ -255,6 +250,83 @@ describe('TexBuilder', () => {
 
             const result = textBuilder.platform[platform].lint(tc.args.lintResponseList)
             // console.log( '#'.repeat(40), '\n', `${platform}.${tc.name}`, '\n', result, '\nCopy This:\n', result.split('\n').join('\\n'), '\n', '*'.repeat(40) )
+
+            expect(result).toBe(expectedOutput)
+          })
+        }
+      })
+    }
+  })
+
+  describe('drift', () => {
+    type DriftTextParams = {
+      name: string
+      args: DriftRunListResponse
+      github: string
+      jira: string
+    }
+
+    const dbDirs = ['migrations', 'mg2', 'mg3', 'mg4', 'mg5', 'mg6']
+
+    const driftTestCases: DriftTextParams[] = [
+      {
+        name: 'schema drift',
+        args: {
+          hasSchemaDrifts: true,
+          drifts: [AtlasDriftResponse.build('-- comment\ndrop table b;'), AtlasDriftResponse.build('')]
+        },
+        github:
+          '\n*Directory*: **migrations**: ❌ Drifts present\n<details><summary>SQL Statements</summary>\n\n```sql\n-- comment\ndrop table b;\n\n```\n</details>\n\n*Directory*: **mg2**: ✅ No Drift',
+        jira: '\n_Directory_: *migrations*: (x) Drifts present\n{code:title=SQL Statements|borderStyle=solid}\n-- comment\ndrop table b;\n\n{code}\n\n_Directory_: *mg2*: (/) No Drift'
+      },
+      {
+        name: 'schema drift multiple dbs',
+        args: {
+          hasSchemaDrifts: true,
+          drifts: [
+            AtlasDriftResponse.build('-- comment\ndrop table b;'),
+            AtlasDriftResponse.build(''),
+            AtlasDriftResponse.build('-- comment2\ndrop table c;')
+          ]
+        },
+        github:
+          '\n*Directory*: **migrations**: ❌ Drifts present\n<details><summary>SQL Statements</summary>\n\n```sql\n-- comment\ndrop table b;\n\n```\n</details>\n\n*Directory*: **mg2**: ✅ No Drift\n*Directory*: **mg3**: ❌ Drifts present\n<details><summary>SQL Statements</summary>\n\n```sql\n-- comment2\ndrop table c;\n\n```\n</details>\n',
+        jira: '\n_Directory_: *migrations*: (x) Drifts present\n{code:title=SQL Statements|borderStyle=solid}\n-- comment\ndrop table b;\n\n{code}\n\n_Directory_: *mg2*: (/) No Drift\n_Directory_: *mg3*: (x) Drifts present\n{code:title=SQL Statements|borderStyle=solid}\n-- comment2\ndrop table c;\n\n{code}\n'
+      },
+      {
+        name: 'schema drift all dbs',
+        args: {
+          hasSchemaDrifts: true,
+          drifts: [
+            AtlasDriftResponse.build('-- comment\ndrop table b;'),
+            AtlasDriftResponse.build('-- comment2\ndrop table c;')
+          ]
+        },
+        github:
+          '\n*Directory*: **migrations**: ❌ Drifts present\n<details><summary>SQL Statements</summary>\n\n```sql\n-- comment\ndrop table b;\n\n```\n</details>\n\n*Directory*: **mg2**: ❌ Drifts present\n<details><summary>SQL Statements</summary>\n\n```sql\n-- comment2\ndrop table c;\n\n```\n</details>\n',
+        jira: '\n_Directory_: *migrations*: (x) Drifts present\n{code:title=SQL Statements|borderStyle=solid}\n-- comment\ndrop table b;\n\n{code}\n\n_Directory_: *mg2*: (x) Drifts present\n{code:title=SQL Statements|borderStyle=solid}\n-- comment2\ndrop table c;\n\n{code}\n'
+      },
+      {
+        name: 'unwanted error',
+        args: {
+          hasSchemaDrifts: true,
+          drifts: [AtlasDriftResponse.fromError('some error'), AtlasDriftResponse.fromError('some unwanted error')]
+        },
+        github: '\n*Directory*: **migrations**: ❌ some error\n*Directory*: **mg2**: ❌ some unwanted error',
+        jira: '\n_Directory_: *migrations*: (x) some error\n_Directory_: *mg2*: (x) some unwanted error'
+      }
+    ]
+
+    for (const platform of platforms) {
+      describe(`${platform}`, () => {
+        for (const tc of driftTestCases) {
+          if (tc[platform] === undefined) continue
+
+          it(`${tc.name}`, async () => {
+            const textBuilder = getTextBuilder(false, dbDirs.slice(0, tc.args.drifts.length))
+            const expectedOutput = tc[platform]
+
+            const result = textBuilder.platform[platform].drift(tc.args)
 
             expect(result).toBe(expectedOutput)
           })

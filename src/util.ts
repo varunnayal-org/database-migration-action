@@ -2,6 +2,13 @@ import { spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import * as core from '@actions/core'
+import * as github from '@actions/github'
+import { Context } from './types.gha'
+
+function getContext(): Context {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return github.context as any as Context
+}
 
 export const hasExtension = (file: string, ext: string): boolean => path.extname(file) === ext
 export const hasExtensions = (file: string, exts: string[]): boolean => exts.includes(path.extname(file))
@@ -12,8 +19,6 @@ export function getRelativePathForDbDirectory(directory: string): string {
   }
   return directory
 }
-
-export type CommentBuilderHandler = (boldText: string, msg?: string) => string
 
 async function cleanDir(dirName: string): Promise<void> {
   try {
@@ -91,7 +96,7 @@ async function exec(command: string, args: string[]): Promise<string> {
       if (output.startsWith('"') && output.endsWith('"')) {
         output = output.slice(1, -1)
       }
-      core.debug(`Command: ${[command, ...args.slice(0, -1), '***']}code=${code} output=${output}`)
+      core.info(`Command: ${[command, ...args.slice(0, -1), '***'].join(' ')}code=${code} output=${output}`)
       if (code === 0) {
         resolve(output)
       } else {
@@ -144,7 +149,7 @@ async function executeWithRetry<T = any>(
   errPrefix: string,
   maxRetryCount = 3,
   minWaitMS = 500,
-  maxWaitMS = 2000
+  maxWaitMS = 5000
 ): Promise<T> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let err: any
@@ -167,4 +172,15 @@ async function executeWithRetry<T = any>(
   throw err
 }
 
-export { createTempDir, removeDir, cleanDir, getEnv, getInput, exec, readableDate, globFromList, executeWithRetry }
+export {
+  getContext,
+  createTempDir,
+  removeDir,
+  cleanDir,
+  getEnv,
+  getInput,
+  exec,
+  readableDate,
+  globFromList,
+  executeWithRetry
+}

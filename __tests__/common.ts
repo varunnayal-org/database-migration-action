@@ -7,12 +7,14 @@ import {
   ContextPullRequest,
   ContextPullRequestComment,
   ContextPullRequestReview,
+  ContextSchedule,
   PullRequest,
   PullRequestCommentPayload,
   PullRequestPayload,
   PullRequestReviewPayload,
   Repository,
   Review,
+  SchedulePayload,
   User
 } from '../src/types.gha'
 import { TEMP_DIR_FOR_MIGRATION } from '../src/constants'
@@ -55,19 +57,21 @@ export function getMockDirectories(): Record<string, any> {
 
 export function getMigrationConfigList(
   dir = '.',
-  databaseUrl = 'test',
+  databaseUrl = '',
   baseDir = 'migrations',
-  devUrl = 'test'
+  devUrl = ''
 ): MigrationConfig[] {
   return [
     {
       dir: path.join(TEMP_DIR_FOR_MIGRATION, dir),
       originalDir: path.join(baseDir, dir),
       relativeDir: path.join(baseDir, dir),
-      databaseUrl,
+      databaseUrl: databaseUrl === '' ? 'postgres://root:secret@db.host:5432/appdb?search_path=public' : databaseUrl,
       baseline: undefined,
       dryRun: true,
-      devUrl
+      revisionSchema: 'public',
+      devUrl:
+        devUrl === '' ? 'postgres://root:secret@localhost:5432/dev-db?sslmode=disabled&search_path=public' : devUrl
     }
   ]
 }
@@ -430,6 +434,16 @@ export function getReview(reviewUser: string, id = 1111111): Review {
   }
 }
 
+export function getSchedulePayload(): SchedulePayload {
+  return {
+    schedule: '10 1 * * *',
+    organization: {
+      login: 'my-org'
+    },
+    repository: getRepo()
+  }
+}
+
 export const prCreated: PullRequestPayload = {
   action: 'opened',
   number: 1,
@@ -513,6 +527,18 @@ export function getPRCommentContext(payload: PullRequestCommentPayload): Context
   return {
     payload,
     eventName: 'issue_comment',
+    sha: 'abcdefgh',
+    ref: 'feature-init',
+    workflow: '1111',
+    runId: 2222,
+    runNumber: 1
+  }
+}
+
+export function getScheduleContext(payload: SchedulePayload): ContextSchedule {
+  return {
+    payload,
+    eventName: 'schedule',
     sha: 'abcdefgh',
     ref: 'feature-init',
     workflow: '1111',

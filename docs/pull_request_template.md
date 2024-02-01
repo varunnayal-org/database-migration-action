@@ -32,5 +32,5 @@ Please delete options that are not relevant.
 To apply the migrations, add the following comment in PR(ensure all the necessary approvals have been received)
 
 ```txt
-db migrate run
+db migrate
 ```

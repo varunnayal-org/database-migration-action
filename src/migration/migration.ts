@@ -5,6 +5,8 @@ import * as core from '@actions/core'
 import * as util from '../util'
 import {
   DatabaseConfig,
+  DriftExecutionResponse,
+  DriftRunListResponse,
   LintExecutionResponse,
   MigrationConfig,
   MigrationExecutionResponse,
@@ -35,11 +37,6 @@ async function ensureSQLFilesInMigrationDir(sourceDir: string, destinationDir: s
   }
 }
 
-async function ensureAtlasConfigFile(sourceDir: string): Promise<void> {
-  const [atlasConfigFileName, atlasConfigFileContent] = atlas.getAtlasHCLFile()
-  await fs.writeFile(path.join(sourceDir, atlasConfigFileName), atlasConfigFileContent)
-}
-
 async function hydrateMigrationConfigWithDBAndDir(
   migrationConfig: MigrationConfig,
   dbConfig: DatabaseConfig,
@@ -51,7 +48,6 @@ async function hydrateMigrationConfigWithDBAndDir(
 
   const tempMigrationSQLDir = await util.createTempDir(path.join(TEMP_DIR_FOR_MIGRATION, dbConfig.directory))
   await ensureSQLFilesInMigrationDir(migrationConfig.originalDir, tempMigrationSQLDir)
-  await ensureAtlasConfigFile(tempMigrationSQLDir)
 
   migrationConfig.dir = tempMigrationSQLDir
   migrationConfig.databaseUrl = secrets[dbConfig.envName]
@@ -88,7 +84,8 @@ async function buildMigrationConfigList(
       dir: '', // filled later on when hydrating
       dryRun: true,
       baseline: dbConfig.baseline,
-      devUrl
+      devUrl,
+      revisionSchema: dbConfig.revisionSchema
     }
     return migrationConfig
   })
@@ -173,11 +170,34 @@ async function runMigrationFromList(
   return response
 }
 
+async function runSchemaDriftFromList(migrationConfigList: MigrationConfig[]): Promise<DriftRunListResponse> {
+  const drifts: DriftExecutionResponse[] = []
+  let errMsg: string | undefined
+  let hasSchemaDrifts = false
+  for (const migrationConfig of migrationConfigList) {
+    const drift = await atlas.drift(migrationConfig)
+    if (!errMsg && drift.getError()) {
+      errMsg = drift.getError()
+    }
+    if (drift.getStatements().length > 0) {
+      hasSchemaDrifts = true
+    }
+    drifts.push(drift)
+  }
+  core.info(`Schema Drift Response: ${JSON.stringify(drifts, null, 2)}`)
+  return {
+    hasSchemaDrifts,
+    drifts,
+    errMsg
+  }
+}
+
 export {
   getDirectoryForDb,
   setDryRun,
   hydrateMigrationConfigList,
   buildMigrationConfigList,
   runMigrationFromList,
-  runLintFromList
+  runLintFromList,
+  runSchemaDriftFromList
 }

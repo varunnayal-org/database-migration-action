@@ -8,10 +8,10 @@ import JiraApi from 'jira-client'
 import { VaultClient } from './client/vault/types'
 import AWSClient from './client/vault/aws'
 import GithubAPI from './client/github'
-import { GHClient, GithubClient, PullRequest } from './types.gha'
+import { GHClient, GithubClient } from './types.gha'
 import Jira from './client/jira'
 import { Config as JiraConfig, JiraClient } from './types.jira'
-import { Builder, Config, MigrationMeta, Notifier } from './types'
+import { Builder, Config, Notifier } from './types'
 import { getInput } from './util'
 import { NotifierService } from './notifier.service'
 
@@ -67,15 +67,8 @@ class Factory implements Builder {
     return new GithubAPI(this.#buildOctokit(getInput('repo_token'), opts))
   }
 
-  getNotifier(
-    dryRun: boolean,
-    pr: PullRequest,
-    migrationMeta: MigrationMeta,
-    config: Config,
-    ghClient: GHClient,
-    jiraClient: JiraClient | null
-  ): Notifier {
-    return new NotifierService(dryRun, pr, migrationMeta, config, ghClient, jiraClient)
+  getNotifier(dryRun: boolean, config: Config, ghClient: GHClient, jiraClient: JiraClient | null): Notifier {
+    return new NotifierService(dryRun, config, ghClient, jiraClient)
   }
 }
 

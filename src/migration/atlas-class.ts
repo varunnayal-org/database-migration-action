@@ -1,10 +1,12 @@
+import { ATLAS_DRIFT_VERSION_TABLE, ATLAS_NO_DRIFT_STR } from '../../src/constants'
 import {
   LintFileResult,
   LintDiagnosticError,
   LintExecutionResponse,
   MigrationExecutionResponse,
   MigrationVersionExecutionResponse,
-  VersionExecutionError
+  VersionExecutionError,
+  DriftExecutionResponse
 } from '../types'
 
 export interface VersionExecution {
@@ -279,14 +281,15 @@ export class AtlasLintResponse implements LintExecutionResponse {
 
         for (const reportJson of reports) {
           for (const diagnosticJson of reportJson.Diagnostics || []) {
+            let canSkipError = false
             // if the error code is not allowed, then continue
             if (!lintCodePrefixes.some(prefix => diagnosticJson.Code.startsWith(prefix))) {
-              continue
+              canSkipError = true
             }
             if (!firstError) {
               firstError = diagnosticJson.Text
             }
-            const canSkipError = skipErrorCodeList.includes(diagnosticJson.Code)
+            canSkipError = canSkipError || skipErrorCodeList.includes(diagnosticJson.Code)
             allSkipped = allSkipped && canSkipError
             diagnostics.push(
               new AtlasFileDiagnostic(
@@ -316,5 +319,109 @@ export class AtlasLintResponse implements LintExecutionResponse {
     }
 
     return new AtlasLintResponse(fileLintResults, migrationDir, allSkipped, firstError)
+  }
+}
+
+export type DriftStatement = {
+  comment: string
+  command: string
+}
+
+/**
+ * Class representing the response of a drift detection execution.
+ * Drift detection is the process of identifying differences between the database schema in the
+ * migration files and the actual schema in the database.
+ */
+export class AtlasDriftResponse implements DriftExecutionResponse {
+  private statements: DriftStatement[]
+  private error?: string
+
+  private constructor(statements: DriftStatement[]) {
+    this.statements = statements
+  }
+
+  static fromError(error: string): AtlasDriftResponse {
+    const drift = new AtlasDriftResponse([])
+    drift.error = error
+    return drift
+  }
+
+  /**
+   * Builds a AtlasDriftResponse object from the given response string.
+   * The response string is expected to be a series of SQL commands, each ending with a semicolon.
+   * Comments are lines that start with '--'.
+   *
+   * Example response string:
+   * "-- Comment for the first command
+   *   CREATE TABLE new_table;
+   * -- Comment for the second command
+   *   ALTER TABLE old_table ADD COLUMN new_column INT;"
+   *
+   * @param {string} response - The response string to parse.
+   * @returns {AtlasDriftResponse} - The built AtlasDriftResponse object.
+   */
+  static build(response: string): AtlasDriftResponse {
+    const responseCopy = (response || '').trim()
+    if (!responseCopy || responseCopy === ATLAS_NO_DRIFT_STR) {
+      return new AtlasDriftResponse([])
+    }
+    const lines = responseCopy.split('\n')
+
+    const statements: DriftStatement[] = []
+    let statementsSkipped = false
+
+    let currentCommand = ''
+    let comment = ''
+    for (const line of lines) {
+      const trimmedLine = line.trim()
+      if (trimmedLine.startsWith('--')) {
+        comment = trimmedLine
+      } else {
+        currentCommand += `${line}\n`
+        if (trimmedLine.endsWith(';')) {
+          if (!comment) {
+            /*
+            -- ABC
+            command;
+            some other unwanted text; // no comment for this one
+            */
+            return AtlasDriftResponse.fromError(response)
+          }
+          // This should not come as we are using "--exclude" parameter in "atlas schema diff"
+          if (comment !== ATLAS_DRIFT_VERSION_TABLE) {
+            statements.push({
+              comment,
+              command: currentCommand
+            })
+          } else {
+            statementsSkipped = true
+          }
+          currentCommand = ''
+          comment = ''
+        }
+      }
+    }
+
+    // Capture response string that does not contain any ';'
+    if (statements.length === 0 && statementsSkipped === false && response) {
+      return AtlasDriftResponse.fromError(response)
+    }
+    return new AtlasDriftResponse(statements)
+  }
+
+  /**
+   * Gets the list of drift statements in the response.
+   * @returns {DriftStatement[]} - The list of drift statements.
+   */
+  getStatements(): DriftStatement[] {
+    return this.statements
+  }
+
+  /**
+   * Gets the error, if any, generate from drift command
+   * @returns {string | undefined} - The error if any
+   */
+  getError(): string | undefined {
+    return this.error
   }
 }

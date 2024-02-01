@@ -21,7 +21,13 @@ export type CustomFields = {
   /**
    * Add Repo Link to JIRA Issue.
    */
-  repo?: string
+  repo: string
+
+  /**
+   * Repo Label used for searching ticket for schema drift
+   */
+  repoLabel: string
+
   /**
    * List of approvals required for PR to be merged.
    */
@@ -49,9 +55,20 @@ export interface Config {
   label: string
 
   /**
-   * JIRA Issue type. Defaults to 'Task'.
+   * JIRA Issue type. Defaults to 'Story'.
    */
   issueType: string
+
+  /**
+   * JIRA Issue type for Schema drifts. Defaults to 'Bug'.
+   */
+  schemaDriftIssueType: string
+
+  /**
+   * Label to add on JIRA issue when schema drift is captured.
+   * Defaults to "schema-drift"
+   */
+  schemaDriftLabel: string
 
   /**
    * Custom fields for JIRA Issue.
@@ -84,7 +101,7 @@ export type JiraComment = {
   body: string
 }
 
-export type CreateTicketParams = {
+export type CreateTicketParams1 = {
   prNumber: number
   title: string
   description: string
@@ -92,6 +109,20 @@ export type CreateTicketParams = {
   prLink: string
   repoLink: string
 }
+
+export type CreateTicketParams = {
+  description: string
+  assigneeName?: string
+  repoLink: string
+} & (
+  | {
+      prNumber: number
+      prLink: string
+    }
+  | {
+      isSchemaDrift: true
+    }
+)
 
 /**
  * Represents the JIRA Client.
@@ -114,6 +145,14 @@ export interface JiraClient {
    * @returns A promise that resolves to the JIRA issue or null if not found.
    */
   findIssue(prLink: string): Promise<JiraIssue | null>
+
+  /**
+   * Finds a JIRA issue that has been created by schema drift
+   *
+   * @param repoLink - Repository link
+   * @param doneStatus - Resolved status for JIRA ticket
+   */
+  findSchemaDriftIssue(repoLink: string, doneStatus: string): Promise<JiraIssue | null>
 
   /**
    * Creates a JIRA issue.
